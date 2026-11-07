@@ -27,14 +27,18 @@ export const eventType = pgEnum("event_type", [
   "copy_paste", "document_open", "document_save", "form_submit", "print", "email_compose", "handoff",
 ]);
 export const opportunityType = pgEnum("opportunity_type", ["ai_agent", "rpa", "conventional_automation", "process_change", "role_consolidation"]);
-export const opportunityStatus = pgEnum("opportunity_status", ["identified", "reviewing", "approved", "in_progress", "deployed", "verified", "rejected"]);
+export const opportunityStatus = pgEnum("opportunity_status", ["identified", "reviewing", "approved", "in_progress", "deployed", "verified", "rejected", "postponed", "analysis_requested"]);
 export const agentStatus = pgEnum("agent_status", ["draft", "configured", "deployed", "paused", "retired", "error"]);
 export const runStatus = pgEnum("run_status", ["queued", "running", "awaiting_approval", "succeeded", "failed", "rolled_back", "cancelled"]);
 export const approvalStatus = pgEnum("approval_status", ["pending", "approved", "rejected", "expired"]);
-export const integrationProvider = pgEnum("integration_provider", ["n8n", "power_automate", "uipath", "mimica", "stripe", "oidc", "anthropic"]);
+export const integrationProvider = pgEnum("integration_provider", ["n8n", "power_automate", "uipath", "mimica", "stripe", "oidc", "anthropic", "celonis", "uipath_process_mining", "microsoft_365", "google_workspace", "salesforce", "hubspot", "sap", "oracle", "netsuite", "workday", "adp", "quickbooks", "servicenow", "slack", "teams", "sharepoint", "zendesk", "scim"]);
 export const integrationStatus = pgEnum("integration_status", ["not_configured", "configured", "connected", "error", "license_required"]);
 export const subscriptionStatus = pgEnum("subscription_status", ["trialing", "active", "past_due", "canceled", "unpaid"]);
 export const planEnum = pgEnum("plan", ["starter", "growth", "enterprise"]);
+export const savingsTier = pgEnum("savings_tier", ["approved", "cost_avoidance", "realized_hard"]);
+export const ledgerStatus = pgEnum("ledger_status", ["draft", "submitted", "approved", "rejected"]);
+export const buKind = pgEnum("bu_kind", ["subsidiary", "division", "business_unit"]);
+export const milestoneStatus = pgEnum("milestone_status", ["not_started", "in_progress", "blocked", "done"]);
 export const projectStatus = pgEnum("project_status", ["proposed", "approved", "in_progress", "live", "measuring", "closed"]);
 
 const ts = () => timestamp("created_at", { withTimezone: true }).defaultNow().notNull();
@@ -102,12 +106,39 @@ export const invitations = pgTable("invitations", {
 }, (t) => [index("invitations_org").on(t.orgId)]);
 
 // ---------- org structure ----------
+export const businessUnits = pgTable("business_units", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  kind: buKind("kind").notNull().default("business_unit"),
+  parentBusinessUnitId: uuid("parent_business_unit_id"),
+  country: text("country"),
+  currency: text("currency").notNull().default("USD"),
+  createdAt: ts(),
+}, (t) => [index("bu_org").on(t.orgId)]);
+
+export const locations = pgTable("locations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  businessUnitId: uuid("business_unit_id").references(() => businessUnits.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  city: text("city"),
+  region: text("region"),
+  country: text("country").notNull().default("US"),
+  timezone: text("timezone").notNull().default("America/Chicago"),
+  createdAt: ts(),
+}, (t) => [index("locations_org").on(t.orgId)]);
+
 export const departments = pgTable("departments", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   parentDepartmentId: uuid("parent_department_id"),
   headEmployeeId: uuid("head_employee_id"),
+  businessUnitId: uuid("business_unit_id"),
+  locationId: uuid("location_id"),
+  annualOverhead: numeric("annual_overhead", { precision: 14, scale: 2 }), // non-labor dept costs (software, facilities) — entered, basis per row
+  overheadBasis: basisEnum("overhead_basis").notNull().default("assumed"),
   createdAt: ts(),
 }, (t) => [index("departments_org").on(t.orgId)]);
 
@@ -121,6 +152,8 @@ export const employees = pgTable("employees", {
   email: text("email"),
   title: text("title"),
   location: text("location"),
+  locationId: uuid("location_id"),
+  businessUnitId: uuid("business_unit_id"),
   // Compensation inputs used ONLY for loaded-cost math. Stored per-employee; never shown to peers.
   baseAnnualCost: numeric("base_annual_cost", { precision: 12, scale: 2 }),
   loadedHourlyCost: numeric("loaded_hourly_cost", { precision: 10, scale: 2 }),
@@ -435,6 +468,10 @@ export const projects = pgTable("projects", {
   targetDate: timestamp("target_date", { withTimezone: true }),
   ownerUserId: uuid("owner_user_id").references(() => users.id),
   notes: text("notes"),
+  targetAnnualSavings: numeric("target_annual_savings", { precision: 14, scale: 2 }),
+  priorityScore: numeric("priority_score", { precision: 5, scale: 2 }),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  verifiedBy: uuid("verified_by"),
   createdAt: ts(), updatedAt: upd(),
 }, (t) => [index("projects_org").on(t.orgId)]);
 
@@ -478,6 +515,119 @@ export const invoices = pgTable("invoices", {
   pdfUrl: text("pdf_url"),
   createdAt: ts(),
 }, (t) => [index("invoices_org").on(t.orgId)]);
+
+export const projectMilestones = pgTable("project_milestones", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: milestoneStatus("status").notNull().default("not_started"),
+  startDate: timestamp("start_date", { withTimezone: true }),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  dependsOnMilestoneId: uuid("depends_on_milestone_id"),
+  ownerUserId: uuid("owner_user_id"),
+  sort: integer("sort").notNull().default(0),
+  createdAt: ts(),
+}, (t) => [index("milestones_project").on(t.projectId), index("milestones_org").on(t.orgId)]);
+
+export const projectRisks = pgTable("project_risks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  severity: integer("severity").notNull().default(3), // 1..5
+  likelihood: integer("likelihood").notNull().default(3), // 1..5
+  mitigation: text("mitigation"),
+  status: text("status").notNull().default("open"), // open | mitigated | closed
+  createdAt: ts(),
+}, (t) => [index("risks_project").on(t.projectId), index("risks_org").on(t.orgId)]);
+
+/** Executive decision history on opportunities (approve / reject / postpone / request analysis). */
+export const opportunityDecisions = pgTable("opportunity_decisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  opportunityId: uuid("opportunity_id").notNull().references(() => opportunities.id, { onDelete: "cascade" }),
+  decision: text("decision").notNull(), // approve | reject | postpone | request_analysis | reopen
+  note: text("note"),
+  decidedBy: uuid("decided_by"),
+  createdAt: ts(),
+}, (t) => [index("opp_decisions_org").on(t.orgId, t.opportunityId)]);
+
+/**
+ * Savings ledger — the human-attested tiers of the Savings Intelligence Engine.
+ * Potential / verified-time / capacity tiers are computed live from opportunities and measurements;
+ * these three tiers require an explicit, evidenced, approved entry:
+ *   approved       — finance-approved business case for an opportunity (annual $)
+ *   cost_avoidance — future expense demonstrably avoided (e.g. a req not opened), with evidence
+ *   realized_hard  — confirmed reduction in an actual expense line (payroll, vendor, overtime)
+ * `dedupeKey` (defaults to workflow id) prevents two entries claiming the same saving in the same tier+period.
+ */
+export const savingsLedger = pgTable("savings_ledger", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  tier: savingsTier("tier").notNull(),
+  status: ledgerStatus("status").notNull().default("submitted"),
+  title: text("title").notNull(),
+  annualAmount: numeric("annual_amount", { precision: 14, scale: 2 }).notNull(),
+  hoursPerYear: numeric("hours_per_year", { precision: 12, scale: 2 }),
+  opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  workflowId: uuid("workflow_id").references(() => workflows.id, { onDelete: "set null" }),
+  departmentId: uuid("department_id"),
+  dedupeKey: text("dedupe_key").notNull(),
+  effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+  effectiveTo: timestamp("effective_to", { withTimezone: true }),
+  evidence: jsonb("evidence").$type<{ kind: string; ref: string; note?: string }[]>().notNull().default([]),
+  calculation: jsonb("calculation").$type<CalcTree>(),
+  basis: basisEnum("basis").notNull().default("observed"),
+  submittedBy: uuid("submitted_by"),
+  approvedBy: uuid("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  rejectionReason: text("rejection_reason"),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("ledger_org_tier").on(t.orgId, t.tier, t.status), index("ledger_dedupe").on(t.orgId, t.tier, t.dedupeKey)]);
+
+/** Point-in-time Business Evaluations (Transformation Score snapshots). */
+export const evaluations = pgTable("evaluations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("in_progress"), // in_progress | presented | approved
+  steps: jsonb("steps").$type<Record<string, { done: boolean; at?: string; note?: string }>>().notNull().default({}),
+  snapshot: jsonb("snapshot").$type<Record<string, unknown>>(),
+  createdBy: uuid("created_by"),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("evaluations_org").on(t.orgId)]);
+
+/** External benchmark datasets. Never seeded with invented data — every row must cite a source. */
+export const benchmarkDatasets = pgTable("benchmark_datasets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  source: text("source").notNull(),
+  sourceUrl: text("source_url"),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  sampleDescription: text("sample_description").notNull(),
+  applicability: text("applicability"),
+  metrics: jsonb("metrics").$type<{ key: string; label: string; value: number; unit: string }[]>().notNull().default([]),
+  createdBy: uuid("created_by"),
+  createdAt: ts(),
+}, (t) => [index("benchmarks_org").on(t.orgId)]);
+
+/** Saved dashboard views (filters + layout) per user. */
+export const dashboardViews = pgTable("dashboard_views", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull(),
+  page: text("page").notNull(),
+  name: text("name").notNull(),
+  filters: jsonb("filters").$type<Record<string, string>>().notNull().default({}),
+  layout: jsonb("layout").$type<{ hidden?: string[]; order?: string[] }>().notNull().default({}),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdAt: ts(),
+}, (t) => [index("views_org_user").on(t.orgId, t.userId, t.page)]);
 
 // ---------- integrations, retention, audit ----------
 export const integrations = pgTable("integrations", {
@@ -548,6 +698,7 @@ export const TENANT_TABLES = [
   "memberships", "invitations", "departments", "employees", "consent_records", "authorizations", "collectors",
   "observation_campaigns", "activity_events", "workflows", "workflow_employees", "analysis_runs", "opportunities",
   "credentials", "agents", "agent_runs", "approvals", "savings_measurements", "financial_models", "projects",
-  "reports", "subscriptions", "invoices", "integrations",
+  "reports", "subscriptions", "invoices", "integrations", "business_units", "locations", "project_milestones",
+  "project_risks", "opportunity_decisions", "savings_ledger", "evaluations", "benchmark_datasets", "dashboard_views",
 ] as const;
 export const _sql = sql;

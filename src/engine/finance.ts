@@ -175,9 +175,14 @@ function resolveAssumptions(model: FinancialAssumptions, overrides: FinancialOve
 
 type Rollup = HeadlineNumbers & {
   lines: OpportunityLine[];
+  overlapRemovedAnnual: number;
+  overlapRemovedHoursPerWeek: number;
   threeYear: ThreeYear;
   trees: Pick<OrgFinancials["trees"], "recoverableHours" | "grossSavings" | "realizableSavings" | "implementationCost" | "operatingCost" | "netSavings" | "roi" | "payback">;
 };
+
+/** No workflow can be automated beyond this share of its observed time, however many opportunities target it. */
+export const MAX_AUTOMATABLE_SHARE = 0.9;
 
 function rollupOpportunities(d: Loaded, a: FinancialAssumptions, p: ScenarioParams, inScope: (typeof schema.opportunities.$inferSelect)[], deployedAgents: number): Rollup {
   const wfById = new Map(d.workflows.map((w) => [w.id, w]));
@@ -222,6 +227,29 @@ function rollupOpportunities(d: Loaded, a: FinancialAssumptions, p: ScenarioPara
     };
   }).sort((x, y) => y.realizableAnnualSavings - x.realizableAnnualSavings);
 
+  // --- overlap de-duplication: several opportunities on the same workflow may never claim more than
+  // MAX_AUTOMATABLE_SHARE of that workflow's observed hours. Excess is scaled out proportionally and reported.
+  let overlapRemovedAnnual = 0; let overlapRemovedHoursPerWeek = 0;
+  const byWf = new Map<string, OpportunityLine[]>();
+  for (const l of lines) if (l.workflowId) { const arr = byWf.get(l.workflowId) ?? []; arr.push(l); byWf.set(l.workflowId, arr); }
+  for (const group of byWf.values()) {
+    if (group.length < 2) continue;
+    const cap = group[0].hoursPerWeek * MAX_AUTOMATABLE_SHARE * p.adoptionRate;
+    const claimed = sum(group.map((l) => l.hoursRecoverablePerWeek));
+    if (claimed <= cap || claimed <= 0) continue;
+    const factor = cap / claimed;
+    for (const l of group) {
+      const removedH = l.hoursRecoverablePerWeek * (1 - factor);
+      const removedR = l.realizableAnnualSavings * (1 - factor);
+      overlapRemovedHoursPerWeek += removedH; overlapRemovedAnnual += removedR;
+      l.overlap = { factor, hoursRemovedPerWeek: removedH, realizableRemoved: removedR, sharedWith: group.filter((g) => g.id !== l.id).map((g) => g.id) };
+      l.hoursRecoverablePerWeek *= factor; l.grossAnnualSavings *= factor; l.realizableAnnualSavings *= factor;
+      l.netAnnualSavings = l.realizableAnnualSavings - l.annualOperatingCost;
+      l.paybackMonths = l.netAnnualSavings > 0 ? l.implementationCost / (l.netAnnualSavings / 12) : null;
+      l.tree = { label: "Realizable after overlap de-duplication", value: l.realizableAnnualSavings, unit: "usd", basis: "estimated", formula: `pre-overlap realizable × ${factor.toFixed(3)} (shared workflow capped at ${(MAX_AUTOMATABLE_SHARE * 100).toFixed(0)}% of observed hours)`, source: `Shared with ${l.overlap.sharedWith.length} other opportunit${l.overlap.sharedWith.length === 1 ? "y" : "ies"} on ${l.workflowName ?? "the same workflow"}`, children: [l.tree] };
+    }
+  }
+
   const hoursRecoverablePerWeek = sum(lines.map((l) => l.hoursRecoverablePerWeek));
   const grossAnnualSavings = sum(lines.map((l) => l.grossAnnualSavings));
   const realizableAnnualSavings = sum(lines.map((l) => l.realizableAnnualSavings));
@@ -261,7 +289,7 @@ function rollupOpportunities(d: Loaded, a: FinancialAssumptions, p: ScenarioPara
       { label: "Net annual savings", value: netAnnualSavings, unit: "usd", basis: "estimated" },
     ] },
   };
-  return { hoursRecoverablePerWeek, grossAnnualSavings, realizableAnnualSavings, implementationCost, annualOperatingCost, platformAnnual, netAnnualSavings, roi1y, paybackMonths, lines, threeYear, trees };
+  return { hoursRecoverablePerWeek, grossAnnualSavings, realizableAnnualSavings, implementationCost, annualOperatingCost, platformAnnual, netAnnualSavings, roi1y, paybackMonths, lines, threeYear, trees, overlapRemovedAnnual, overlapRemovedHoursPerWeek };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -406,6 +434,7 @@ export async function computeOrgFinancials(orgId: string, overrides: FinancialOv
   return {
     orgId, computedAt: new Date().toISOString(),
     totalAnnualLaborAnalyzed, employeesAnalyzed: analyzed.length, hoursObservedPerWeek, repetitiveHoursPerWeek, repetitiveSharePct,
+    overlapRemovedAnnual: main.overlapRemovedAnnual, overlapRemovedHoursPerWeek: main.overlapRemovedHoursPerWeek,
     hoursRecoverablePerWeek: main.hoursRecoverablePerWeek, grossAnnualSavings: main.grossAnnualSavings, realizableAnnualSavings: main.realizableAnnualSavings,
     verifiedAnnualizedSavings, verifiedHoursSaved, verifiedHoursSavedAnnualized, verifiedDollarsSaved, verifiedMeasurements: inPeriod.length,
     implementationCost: main.implementationCost, annualOperatingCost: main.annualOperatingCost, platformAnnual: main.platformAnnual, netAnnualSavings: main.netAnnualSavings,

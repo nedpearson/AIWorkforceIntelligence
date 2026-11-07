@@ -31,7 +31,8 @@ BEGIN
     'memberships','invitations','departments','employees','consent_records','authorizations','collectors',
     'observation_campaigns','activity_events','workflows','workflow_employees','analysis_runs','opportunities',
     'credentials','agents','agent_runs','approvals','savings_measurements','financial_models','projects',
-    'reports','subscriptions','invoices','integrations'
+    'reports','subscriptions','invoices','integrations','business_units','locations','project_milestones',
+    'project_risks','opportunity_decisions','savings_ledger','evaluations','benchmark_datasets','dashboard_views'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t); -- owner = admin handle (auth, jobs, seed); app role is always policy-bound

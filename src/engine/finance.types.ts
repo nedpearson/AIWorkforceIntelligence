@@ -65,6 +65,8 @@ export type OpportunityLine = {
   basis: Basis;
   deployed: boolean;
   tree: CalcTree;
+  /** Present when this line shared a workflow with other opportunities and was scaled down to avoid double counting. */
+  overlap?: { factor: number; hoursRemovedPerWeek: number; realizableRemoved: number; sharedWith: string[] };
 };
 
 export type DepartmentFinancials = {
@@ -108,6 +110,9 @@ export type OrgFinancials = {
   hoursObservedPerWeek: number;
   repetitiveHoursPerWeek: number;
   repetitiveSharePct: number;
+  /** Realizable $ removed because several opportunities targeted the same workflow (never double-counted). */
+  overlapRemovedAnnual: number;
+  overlapRemovedHoursPerWeek: number;
   hoursRecoverablePerWeek: number;
   grossAnnualSavings: number;
   realizableAnnualSavings: number;

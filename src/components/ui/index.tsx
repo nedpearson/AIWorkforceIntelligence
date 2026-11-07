@@ -15,12 +15,14 @@ export function CardHeader({ title, subtitle, action, className }: { title: Reac
     </div>
   );
 }
-type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" | "lg"; href?: string; loading?: boolean };
+type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" | "gradient" | "glass"; size?: "sm" | "md" | "lg"; href?: string; loading?: boolean };
 export function Button({ className, variant = "primary", size = "md", href, loading, children, disabled, ...p }: BtnProps) {
   const cls = cn(
-    "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap",
+    "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap active:scale-[.98]",
     size === "sm" ? "h-8 px-3 text-xs" : size === "lg" ? "h-11 px-5 text-sm" : "h-9 px-4 text-sm",
-    variant === "primary" && "bg-brand text-white hover:bg-brand/90 shadow-sm",
+    variant === "primary" && "bg-royal text-white hover:bg-royal-ink shadow-[0_6px_16px_-6px_rgba(37,99,235,.6)]",
+    variant === "gradient" && "bg-[linear-gradient(135deg,#2563eb,#6366f1_55%,#8b5cf6)] text-white shadow-[0_8px_20px_-8px_rgba(99,102,241,.7)] hover:brightness-110",
+    variant === "glass" && "bg-white/10 text-white ring-1 ring-white/20 backdrop-blur hover:bg-white/20",
     variant === "secondary" && "bg-surface border border-border text-ink hover:bg-surface-2",
     variant === "ghost" && "text-ink-2 hover:bg-surface-2 hover:text-ink",
     variant === "danger" && "bg-danger text-white hover:bg-danger/90",
@@ -29,13 +31,15 @@ export function Button({ className, variant = "primary", size = "md", href, load
   if (href) { const { type: _t, disabled: _d, onClick: _o, ...rest } = p as Record<string, unknown>; void _t; void _d; void _o; return <Link href={href} className={cls} {...(rest as object)}>{children}</Link>; }
   return <button className={cls} disabled={disabled || loading} {...p}>{loading && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />}{children}</button>;
 }
-export function Badge({ children, tone = "neutral", className }: { children: React.ReactNode; tone?: "neutral" | "brand" | "money" | "warn" | "danger" | "info" | "verified" | "projected"; className?: string }) {
-  const t: Record<string, string> = { neutral: "bg-surface-2 text-ink-2", brand: "bg-brand-soft text-brand", money: "bg-money-soft text-money", warn: "bg-warn-soft text-warn", danger: "bg-danger-soft text-danger", info: "bg-info-soft text-info", verified: "bg-verified-soft text-verified", projected: "bg-projected-soft text-projected" };
+export type Tone = "neutral" | "brand" | "money" | "warn" | "danger" | "info" | "verified" | "projected" | "royal" | "purple" | "cyan" | "emerald" | "gold" | "coral" | "indigo";
+export const TONE_CLASS: Record<Tone, string> = { neutral: "bg-surface-2 text-ink-2", brand: "bg-royal-soft text-royal-ink", money: "bg-emerald-soft text-emerald-ink", warn: "bg-gold-soft text-gold-ink", danger: "bg-coral-soft text-coral-ink", info: "bg-cyan-soft text-cyan-ink", verified: "bg-emerald-soft text-emerald-ink", projected: "bg-gold-soft text-gold-ink", royal: "bg-royal-soft text-royal-ink", purple: "bg-purple-soft text-purple-ink", cyan: "bg-cyan-soft text-cyan-ink", emerald: "bg-emerald-soft text-emerald-ink", gold: "bg-gold-soft text-gold-ink", coral: "bg-coral-soft text-coral-ink", indigo: "bg-indigo-soft text-indigo-ink" };
+export function Badge({ children, tone = "neutral", className }: { children: React.ReactNode; tone?: Tone; className?: string }) {
+  const t = TONE_CLASS;
   return <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide", t[tone], className)}>{children}</span>;
 }
 /** Basis chip: observed / estimated / assumed — required next to every analytical number. */
 export function BasisChip({ basis }: { basis: "observed" | "estimated" | "assumed" }) {
-  const tone = basis === "observed" ? "verified" : basis === "estimated" ? "projected" : "warn";
+  const tone: Tone = basis === "observed" ? "emerald" : basis === "estimated" ? "gold" : "neutral";
   return <Badge tone={tone}>{basis}</Badge>;
 }
 export function Input({ className, label, hint, error, ...p }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string; hint?: string; error?: string }) {
@@ -83,17 +87,45 @@ export function Tooltip({ text, children }: { text: string; children?: React.Rea
   return (
     <span className="group relative inline-flex items-center">
       {children ?? <Info size={14} className="text-ink-3" />}
-      <span role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-md bg-ink px-2.5 py-1.5 text-[11px] leading-snug text-white opacity-0 shadow-pop transition group-hover:opacity-100 group-focus-within:opacity-100">{text}</span>
+      <span role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-lg bg-midnight px-2.5 py-1.5 text-[11px] leading-snug text-white opacity-0 shadow-pop ring-1 ring-white/10 transition group-hover:opacity-100 group-focus-within:opacity-100">{text}</span>
     </span>
   );
 }
 export function Empty({ title, body, action }: { title: string; body?: string; action?: React.ReactNode }) {
   return <div className="card flex flex-col items-center gap-2 px-6 py-10 text-center"><p className="text-sm font-semibold">{title}</p>{body && <p className="max-w-md text-xs text-ink-2">{body}</p>}{action}</div>;
 }
-export function PageHeader({ title, subtitle, actions }: { title: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode }) {
+/**
+ * Page header. Pass `hero` for the signature gradient band (module landing pages); `eyebrow` names the module group;
+ * `icon` renders in a tinted tile. Actions sit right on desktop and wrap below on mobile.
+ */
+export function PageHeader({ title, subtitle, actions, eyebrow, icon, hero, accent = "royal" }: { title: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode; eyebrow?: string; icon?: React.ReactNode; hero?: boolean; accent?: "royal" | "purple" | "cyan" | "emerald" | "gold" | "coral" | "indigo" }) {
+  if (hero) return (
+    <div className="bg-hero relative mb-6 overflow-hidden rounded-[20px] px-5 py-6 text-white shadow-[var(--shadow-lift)] sm:px-7 sm:py-7">
+      <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(245,158,11,.25),transparent_70%)]" />
+      <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex items-start gap-3">
+          {icon && <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20">{icon}</div>}
+          <div>
+            {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[.16em] text-cyan-300">{eyebrow}</div>}
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
+            {subtitle && <p className="mt-1 max-w-3xl text-sm text-slate-300">{subtitle}</p>}
+          </div>
+        </div>
+        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      </div>
+    </div>
+  );
+  const tile: Record<string, string> = { royal: "bg-royal-soft text-royal-ink", purple: "bg-purple-soft text-purple-ink", cyan: "bg-cyan-soft text-cyan-ink", emerald: "bg-emerald-soft text-emerald-ink", gold: "bg-gold-soft text-gold-ink", coral: "bg-coral-soft text-coral-ink", indigo: "bg-indigo-soft text-indigo-ink" };
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div><h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>{subtitle && <p className="mt-1 text-sm text-ink-2">{subtitle}</p>}</div>
+      <div className="flex items-start gap-3">
+        {icon && <div className={cn("mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", tile[accent])}>{icon}</div>}
+        <div>
+          {eyebrow && <div className="text-[11px] font-semibold uppercase tracking-[.14em] text-ink-3">{eyebrow}</div>}
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">{title}</h1>
+          {subtitle && <p className="mt-1 max-w-3xl text-sm text-ink-2">{subtitle}</p>}
+        </div>
+      </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   );
@@ -101,5 +133,5 @@ export function PageHeader({ title, subtitle, actions }: { title: React.ReactNod
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn("card overflow-x-auto scrollbar-thin p-0", className)}><table className="w-full text-sm">{children}</table></div>;
 }
-export const Th = ({ children, className, ...p }: React.ThHTMLAttributes<HTMLTableCellElement>) => <th className={cn("whitespace-nowrap border-b border-border bg-surface-2 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-2", className)} {...p}>{children}</th>;
-export const Td = ({ children, className, ...p }: React.TdHTMLAttributes<HTMLTableCellElement>) => <td className={cn("border-b border-border px-4 py-2.5 align-middle", className)} {...p}>{children}</td>;
+export const Th = ({ children, className, ...p }: React.ThHTMLAttributes<HTMLTableCellElement>) => <th className={cn("whitespace-nowrap border-b border-border bg-surface-2/70 px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-2", className)} {...p}>{children}</th>;
+export const Td = ({ children, className, ...p }: React.TdHTMLAttributes<HTMLTableCellElement>) => <td className={cn("border-b border-border/70 px-4 py-3 align-middle", className)} {...p}>{children}</td>;

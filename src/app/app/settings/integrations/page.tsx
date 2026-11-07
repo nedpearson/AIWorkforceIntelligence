@@ -13,7 +13,7 @@ export default async function IntegrationsPage() {
   const ctx = await requireCtx("org:manage");
   const rows = await withTenant(ctx.orgId, (tx) => tx.select({ provider: schema.integrations.provider, status: schema.integrations.status, config: schema.integrations.config, lastCheckedAt: schema.integrations.lastCheckedAt, lastError: schema.integrations.lastError, credentialId: schema.integrations.credentialId }).from(schema.integrations).where(eq(schema.integrations.orgId, ctx.orgId)));
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
-  const row = (p: string): IntegrationRow | null => { const r = byProvider.get(p as IntegrationRow["provider"]); return r ? { provider: r.provider, status: r.status, config: (r.config as Record<string, unknown>) ?? {}, lastCheckedAt: r.lastCheckedAt?.toISOString() ?? null, lastError: r.lastError, hasCredential: !!r.credentialId } : null; };
+  const row = (p: string): IntegrationRow | null => { const r = byProvider.get(p as IntegrationRow["provider"]); return r ? { provider: r.provider as IntegrationRow["provider"], status: r.status, config: (r.config as Record<string, unknown>) ?? {}, lastCheckedAt: r.lastCheckedAt?.toISOString() ?? null, lastError: r.lastError, hasCredential: !!r.credentialId } : null; };
   const n8nEnv = !!(process.env.N8N_BASE_URL && process.env.N8N_API_KEY);
   return (
     <IntegrationsClient

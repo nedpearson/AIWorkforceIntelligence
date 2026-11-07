@@ -4,10 +4,10 @@ import { NextResponse, type NextRequest } from "next/server";
 export function middleware(req: NextRequest) {
   const hasSession = req.cookies.getAll().some((c) => c.name.includes("authjs.session-token"));
   const p = req.nextUrl.pathname;
-  if ((p.startsWith("/app") || p.startsWith("/admin")) && !hasSession) {
+  if ((p.startsWith("/app") || p.startsWith("/admin") || p.startsWith("/present")) && !hasSession) {
     const url = req.nextUrl.clone(); url.pathname = "/login"; url.searchParams.set("next", p);
     return NextResponse.redirect(url);
   }
   return NextResponse.next();
 }
-export const config = { matcher: ["/app/:path*", "/admin/:path*"] };
+export const config = { matcher: ["/app/:path*", "/admin/:path*", "/present/:path*", "/present"] };
