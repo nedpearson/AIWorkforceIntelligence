@@ -11,6 +11,8 @@ import { SkillStage } from "@/components/workforce/skill-stage";
 import { cn, fmtNum, fmtUSD } from "@/lib/utils";
 import type { SkillInfo } from "@/engine/workforce/skills-adapter";
 import { saveBuilderDraftAction, activateBuilderAction } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatTime } from "@/lib/datetime";
 
 type Persona = { key: string; firstName: string; title: string; team: string; intro: string; responsibilities: string[]; skills: string[]; portrait: string | null; demoSkill: string; providers: string[]; deptId: string | null; existingId: string | null };
 type Rec = { personaKey: string; departmentId: string | null; opportunityId: string; title: string; workflowLabel: string; observedHoursPerWeek: number; hoursRecoverablePerWeek: number; realizableAnnualSavings: number; annualOperatingCost: number; tree: CalcTree };
@@ -28,6 +30,7 @@ export function toChecklist(text: string): string[] {
 const teamForDept = (name: string) => /financ|account/i.test(name) ? "finance" : /sales/i.test(name) ? "sales" : /operat|logist|warehouse/i.test(name) ? "operations" : /market/i.test(name) ? "marketing" : /\bhr\b|human|people/i.test(name) ? "hr" : /customer|support|service/i.test(name) ? "customer_service" : "custom";
 
 export function Builder(p: { departments: { id: string; name: string }[]; personas: Persona[]; teams: { key: string; label: string }[]; skills: SkillInfo[] | null; recs: Rec[]; connectors: Conn[]; documents: { id: string; title: string; category: string; departmentId: string | null }[]; members: { userId: string; label: string }[]; meId: string; role: string; resume: Resume | null }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const r0 = p.resume;
   const [step, setStep] = React.useState(r0 ? 3 : 0);
@@ -74,7 +77,7 @@ export function Builder(p: { departments: { id: string; name: string }[]; person
       knowledgeScope: { departmentIds: s.depts, categories: s.cats, documentIds: s.docs }, monthlyRunBudget: s.monthlyRunBudget, monthlyCostBudget: s.monthlyCostBudget, approvalOwnerUserId: s.approvalOwnerUserId || null, connectedProviders: s.providers,
       portraitProvenance: s.identity === "monogram" ? "none" : undefined });
     if (!r.ok) { setErr(r.error); return null; }
-    setId(r.id); setSaved(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })); return r.id;
+    setId(r.id); setSaved(formatTime(Date.now(), tz, { hour: "numeric", minute: "2-digit" })); return r.id;
   };
   const next = async () => { const v = valid(step); if (v) { setErr(v); return; } setErr(null); setBusy(true); const ok = await save(); setBusy(false); if (step >= 1 && !ok) return; setStep((x) => Math.min(STEPS.length - 1, x + 1)); };
   const back = () => { setErr(null); setStep((x) => Math.max(0, x - 1)); };

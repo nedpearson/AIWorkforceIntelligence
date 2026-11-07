@@ -8,6 +8,8 @@ import { StatTile } from "@/components/dashboard/stat-tile";
 import { ProcessMapView } from "@/components/dashboard/process-map";
 import { OpportunityCard, type OppCardData } from "@/components/dashboard/opportunity-card";
 import { fmtNum, fmtPct } from "@/lib/utils";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 export type WorkflowDetailData = {
   workflow: {
@@ -60,6 +62,7 @@ function toMarkdown(d: WorkflowDetailData): string {
 }
 
 export function WorkflowDetail({ data }: { data: WorkflowDetailData }) {
+  const tz = useTimeZone();
   const w = data.workflow;
   const [drawer, setDrawer] = React.useState(false);
   const paras = describeWorkflow(w, data.performers);
@@ -140,7 +143,7 @@ export function WorkflowDetail({ data }: { data: WorkflowDetailData }) {
           <p className="mb-3 text-xs text-ink-2">The first event of each observed run, up to 50. Only metadata is stored.</p>
           <Table>
             <thead><tr><Th>Id</Th><Th>Time</Th><Th>Person</Th><Th>App</Th><Th>Type</Th><Th className="text-right">Duration</Th></tr></thead>
-            <tbody>{data.sampleEvents.map((e) => <tr key={e.id}><Td className="tabular text-ink-3">{e.id}</Td><Td className="text-xs">{new Date(e.ts).toLocaleString()}</Td><Td className="text-xs">{e.employee}</Td><Td>{e.app}</Td><Td className="text-xs">{e.type.replace("_", " ")}</Td><Td className="text-right tabular">{fmtMs(e.durationMs)}</Td></tr>)}
+            <tbody>{data.sampleEvents.map((e) => <tr key={e.id}><Td className="tabular text-ink-3">{e.id}</Td><Td className="text-xs">{formatDateTime(e.ts, tz)}</Td><Td className="text-xs">{e.employee}</Td><Td>{e.app}</Td><Td className="text-xs">{e.type.replace("_", " ")}</Td><Td className="text-right tabular">{fmtMs(e.durationMs)}</Td></tr>)}
               {data.sampleEvents.length === 0 && <tr><Td colSpan={6} className="text-center text-xs text-ink-3">No sample events kept (they may have been purged by retention).</Td></tr>}</tbody>
           </Table>
         </div>

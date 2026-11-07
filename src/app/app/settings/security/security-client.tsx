@@ -5,11 +5,14 @@ import { ShieldCheck, ShieldOff, KeyRound } from "lucide-react";
 import { Badge, Button, Card, CardHeader, Input, Modal } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { changePassword, mfaConfirm, mfaDisable, mfaStart } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 type Flash = { ok: boolean; text: string } | null;
-const date = (s: string | null) => (s ? new Date(s).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "never");
+const date = (s: string | null, tz: string) => (s ? formatDateTime(s, tz, { dateStyle: "medium", timeStyle: "short" }) : "never");
 
 export function SecurityClient({ user, session, sso, vaultReady }: { user: { email: string; name: string; mfaEnabled: boolean; hasPassword: boolean; sso: boolean; lastLoginAt: string | null; createdAt: string }; session: { role: string; orgName: string; strategy: string }; sso: { configured: boolean; vars: [string, boolean][] }; vaultReady: boolean }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [flash, setFlash] = React.useState<Flash>(null);
   const [enroll, setEnroll] = React.useState<{ qrDataUrl: string; manualKey: string } | null>(null);
@@ -60,8 +63,8 @@ export function SecurityClient({ user, session, sso, vaultReady }: { user: { ema
             <dt className="text-ink-3">Role</dt><dd><span className="capitalize">{session.role}</span> in {session.orgName}</dd>
             <dt className="text-ink-3">Sign-in method</dt><dd>{user.sso ? "Single sign-on" : "Email + password"}{user.mfaEnabled ? " + MFA" : ""}</dd>
             <dt className="text-ink-3">Session</dt><dd>{session.strategy}</dd>
-            <dt className="text-ink-3">Last sign-in</dt><dd>{date(user.lastLoginAt)}</dd>
-            <dt className="text-ink-3">Account created</dt><dd>{date(user.createdAt)}</dd>
+            <dt className="text-ink-3">Last sign-in</dt><dd>{date(user.lastLoginAt, tz)}</dd>
+            <dt className="text-ink-3">Account created</dt><dd>{date(user.createdAt, tz)}</dd>
           </dl>
         </Card>
         <Card data-testid="security-sso">

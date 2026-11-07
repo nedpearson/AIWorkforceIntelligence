@@ -98,6 +98,10 @@ jobs:
       - name: Build
         run: npm run build
       - name: Start the production server
+        # The server renders in UTC, as on Vercel, while Playwright's browser runs in E2E_TZ (America/Chicago): any
+        # date/number formatted without an explicit zone/locale then fails hydration (tests/e2e/hydration.spec.ts).
+        env:
+          TZ: UTC
         run: |
           nohup npm run start > server.log 2>&1 &
           for i in $(seq 1 60); do

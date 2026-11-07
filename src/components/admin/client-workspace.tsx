@@ -10,6 +10,8 @@ import type { SeatUsage } from "@/engine/billing";
 import { openClientApp, bulkEnrollmentCodes, runAnalysisAction, setOpportunityStatus, saveBranding, inviteClientUser, type IssuedCode } from "@/app/admin/clients/[id]/actions";
 import { statusTone } from "./portfolio";
 import { ProjectsTab, BillingTab, ReportsTab, type ProjectsData, type BillingData, type ReportsData } from "./client-tabs-2";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate, formatDateTime, formatTime } from "@/lib/datetime";
 
 export type TabKey = "overview" | "checklist" | "collectors" | "campaigns" | "opportunities" | "projects" | "agents" | "billing" | "reports" | "branding";
 export type FinSlice = { employeesAnalyzed: number; totalAnnualLaborAnalyzed: number; hoursObservedPerWeek: number; repetitiveHoursPerWeek: number; hoursRecoverablePerWeek: number; grossAnnualSavings: number; realizableAnnualSavings: number; verifiedAnnualizedSavings: number; verifiedMeasurements: number; implementationCost: number; annualOperatingCost: number; netAnnualSavings: number; roi1y: number; paybackMonths: number | null; deployedAgents: number; opportunityCount: number; basisSummary: { observed: number; estimated: number; assumed: number }; byDepartment: { name: string; employees: number; realizableAnnual: number; verifiedAnnual: number }[] };
@@ -124,6 +126,7 @@ function OverviewTab({ fin, summary, clientId }: { fin: FinSlice | null; summary
 
 // ---------- Checklist ----------
 function ChecklistTab({ d, s, clientId }: { d: Extract<TabData, { kind: "checklist" }>; s: ClientSummary; clientId: string }) {
+  const tz = useTimeZone();
   const items: { label: string; done: boolean; detail: string; tab?: TabKey; help: string }[] = [
     { label: "Client admin accepted invitation", done: s.inviteAccepted, detail: s.inviteAccepted ? "An owner or admin is active" : s.pendingInvites ? `${s.pendingInvites} invitation(s) pending` : "No invitation outstanding — send one from Branding → Invite", help: "The client needs at least one owner/admin login before they can sign the authorization." },
     { label: "Signed authorization recorded", done: s.authorizations > 0, detail: `${s.authorizations} authorization(s)`, help: "A named officer authorizes metadata-only observation. Done in the client app under Data Collection → Authorization." },
@@ -132,7 +135,7 @@ function ChecklistTab({ d, s, clientId }: { d: Extract<TabData, { kind: "checkli
     { label: "Collectors enrolled", done: s.collectorsActive > 0, detail: `${s.collectorsActive} active, ${s.collectorsPending} pending, ${s.collectorsOffline} offline`, tab: "collectors", help: "Each monitored employee runs the collector. Use the bulk enrollment action." },
     { label: "Consent acknowledged", done: d.consented > 0, detail: `${d.consented} employee(s) acknowledged`, help: "Employees acknowledge the notice in the collector or on the Trust page." },
     { label: "Observation campaign", done: s.campaigns > 0, detail: `${s.campaigns} campaign(s), ${s.campaignsRunning} running`, tab: "campaigns", help: "A campaign defines who is observed and when." },
-    { label: "Analysis run", done: s.lastAnalysisStatus === "done", detail: s.lastAnalysisAt ? `Last ${new Date(s.lastAnalysisAt).toLocaleString()} (${s.lastAnalysisStatus})` : "Never", tab: "campaigns", help: "Turns activity into workflows and ranked opportunities." },
+    { label: "Analysis run", done: s.lastAnalysisStatus === "done", detail: s.lastAnalysisAt ? `Last ${formatDateTime(s.lastAnalysisAt, tz)} (${s.lastAnalysisStatus})` : "Never", tab: "campaigns", help: "Turns activity into workflows and ranked opportunities." },
     { label: "Opportunities approved", done: d.approved > 0, detail: `${d.approved} approved of ${s.opportunities}`, tab: "opportunities", help: "Approval moves an opportunity toward an agent build." },
     { label: "Agents deployed", done: s.agentsDeployed > 0, detail: `${s.agentsDeployed} deployed of ${s.agentsTotal}`, tab: "agents", help: "Deployed in the client app under AI Agents." },
     { label: "Savings measured", done: s.measurements > 0, detail: `${s.measurements} measurement(s)`, help: "Verified savings come only from measurements after deployment." },
@@ -155,6 +158,7 @@ function ChecklistTab({ d, s, clientId }: { d: Extract<TabData, { kind: "checkli
 
 // ---------- Collectors ----------
 function CollectorsTab({ d, clientId }: { d: Extract<TabData, { kind: "collectors" }>; clientId: string }) {
+  const tz = useTimeZone();
   const a = useAction(); const [issued, setIssued] = React.useState<{ issued: IssuedCode[]; skippedForSeats: number } | null>(null);
   const counts = { active: 0, pending: 0, offline: 0, paused: 0, revoked: 0 } as Record<string, number>; d.collectors.forEach((c) => { counts[c.status] = (counts[c.status] ?? 0) + 1; });
   const u = d.usage;
@@ -181,7 +185,7 @@ function CollectorsTab({ d, clientId }: { d: Extract<TabData, { kind: "collector
       </Card>
       {!d.collectors.length ? <Empty title="No collectors" body={d.employees ? "Use bulk enrollment above to create codes." : "Add employees first (wizard CSV or the client app)."} /> : (
         <Table><thead><tr><Th>Employee</Th><Th>Collector</Th><Th>Status</Th><Th>Platform</Th><Th>Last seen</Th><Th className="text-right">Events</Th></tr></thead><tbody>{d.collectors.map((c) => (
-          <tr key={c.id} data-testid={`collector-row-${c.id}`}><Td>{c.employee}</Td><Td>{c.name}</Td><Td><Badge tone={c.status === "active" ? "money" : c.status === "offline" ? "danger" : c.status === "pending" ? "info" : "neutral"}>{c.status}</Badge></Td><Td>{c.platform}</Td><Td>{c.lastSeenAt ? new Date(c.lastSeenAt).toLocaleString() : "never"}</Td><Td className="text-right">{fmtNum(c.events)}</Td></tr>))}</tbody></Table>
+          <tr key={c.id} data-testid={`collector-row-${c.id}`}><Td>{c.employee}</Td><Td>{c.name}</Td><Td><Badge tone={c.status === "active" ? "money" : c.status === "offline" ? "danger" : c.status === "pending" ? "info" : "neutral"}>{c.status}</Badge></Td><Td>{c.platform}</Td><Td>{c.lastSeenAt ? formatDateTime(c.lastSeenAt, tz) : "never"}</Td><Td className="text-right">{fmtNum(c.events)}</Td></tr>))}</tbody></Table>
       )}
     </div>
   );
@@ -189,6 +193,7 @@ function CollectorsTab({ d, clientId }: { d: Extract<TabData, { kind: "collector
 
 // ---------- Campaigns ----------
 function CampaignsTab({ d, clientId }: { d: Extract<TabData, { kind: "campaigns" }>; clientId: string }) {
+  const tz = useTimeZone();
   const a = useAction(); const [jobId, setJobId] = React.useState("");
   const run = async (campaignId?: string) => { const r = await a.run(() => runAnalysisAction({ clientId, campaignId })); if (r) setJobId(r.jobId); };
   return (
@@ -197,17 +202,17 @@ function CampaignsTab({ d, clientId }: { d: Extract<TabData, { kind: "campaigns"
         <CardHeader title="Observation campaigns" subtitle={`${fmtNum(d.events)} activity events stored. Campaigns are created in the client app (Data Collection → Campaigns).`} action={<Button onClick={() => run()} loading={a.busy} disabled={d.events === 0} data-testid="run-analysis-all">Run analysis on all data</Button>} />
         <ErrorNote error={a.error} />
         {jobId && <p className="mb-3 text-xs text-money" data-testid="analysis-queued">Analysis queued (job {jobId.slice(0, 8)}). The worker processes it; refresh to see the run.</p>}
-        {d.pendingJobs.length > 0 && <p className="mb-3 text-xs text-ink-2" data-testid="analysis-pending">{d.pendingJobs.length} analysis job(s) waiting for the worker (<code>npm run worker</code> or <code>/api/jobs/run</code>): {d.pendingJobs.map((j) => `${j.status} · ${new Date(j.createdAt).toLocaleTimeString()}`).join(", ")}</p>}
+        {d.pendingJobs.length > 0 && <p className="mb-3 text-xs text-ink-2" data-testid="analysis-pending">{d.pendingJobs.length} analysis job(s) waiting for the worker (<code>npm run worker</code> or <code>/api/jobs/run</code>): {d.pendingJobs.map((j) => `${j.status} · ${formatTime(j.createdAt, tz)}`).join(", ")}</p>}
         {!d.campaigns.length ? <p className="text-xs text-ink-2">No campaigns yet.</p> : (
           <Table><thead><tr><Th>Name</Th><Th>Status</Th><Th>Window</Th><Th>Scope</Th><Th></Th></tr></thead><tbody>{d.campaigns.map((c) => (
-            <tr key={c.id} data-testid={`campaign-row-${c.id}`}><Td className="font-medium">{c.name}</Td><Td><Badge tone={c.status === "running" ? "money" : c.status === "completed" ? "verified" : "neutral"}>{c.status}</Badge></Td><Td className="text-xs">{c.startsAt ? new Date(c.startsAt).toLocaleDateString() : "—"} → {c.endsAt ? new Date(c.endsAt).toLocaleDateString() : "—"}</Td><Td className="text-xs">{c.employees} people · {c.departments} depts</Td><Td><Button size="sm" variant="secondary" onClick={() => run(c.id)} loading={a.busy} data-testid={`run-analysis-${c.id}`}>Run analysis</Button></Td></tr>))}</tbody></Table>
+            <tr key={c.id} data-testid={`campaign-row-${c.id}`}><Td className="font-medium">{c.name}</Td><Td><Badge tone={c.status === "running" ? "money" : c.status === "completed" ? "verified" : "neutral"}>{c.status}</Badge></Td><Td className="text-xs">{c.startsAt ? formatDate(c.startsAt, tz) : "—"} → {c.endsAt ? formatDate(c.endsAt, tz) : "—"}</Td><Td className="text-xs">{c.employees} people · {c.departments} depts</Td><Td><Button size="sm" variant="secondary" onClick={() => run(c.id)} loading={a.busy} data-testid={`run-analysis-${c.id}`}>Run analysis</Button></Td></tr>))}</tbody></Table>
         )}
       </Card>
       <Card>
         <CardHeader title="Analysis runs" subtitle="Most recent first." />
         {!d.runs.length ? <p className="text-xs text-ink-2">No analysis has run yet.</p> : (
           <Table><thead><tr><Th>When</Th><Th>Status</Th><Th className="text-right">Events</Th><Th className="text-right">Workflows</Th><Th className="text-right">Opportunities</Th></tr></thead><tbody>{d.runs.map((r) => (
-            <tr key={r.id}><Td className="text-xs">{new Date(r.createdAt).toLocaleString()}</Td><Td><Badge tone={r.status === "done" ? "money" : r.status === "failed" ? "danger" : "info"}>{r.status}</Badge>{r.error && <span className="ml-2 text-xs text-danger">{r.error}</span>}</Td><Td className="text-right">{fmtNum(r.eventsAnalyzed)}</Td><Td className="text-right">{fmtNum(r.workflowsFound)}</Td><Td className="text-right">{fmtNum(r.opportunitiesFound)}</Td></tr>))}</tbody></Table>
+            <tr key={r.id}><Td className="text-xs">{formatDateTime(r.createdAt, tz)}</Td><Td><Badge tone={r.status === "done" ? "money" : r.status === "failed" ? "danger" : "info"}>{r.status}</Badge>{r.error && <span className="ml-2 text-xs text-danger">{r.error}</span>}</Td><Td className="text-right">{fmtNum(r.eventsAnalyzed)}</Td><Td className="text-right">{fmtNum(r.workflowsFound)}</Td><Td className="text-right">{fmtNum(r.opportunitiesFound)}</Td></tr>))}</tbody></Table>
         )}
       </Card>
     </div>

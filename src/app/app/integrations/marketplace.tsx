@@ -8,13 +8,15 @@ import { fmtNum, fmtUSD, cn } from "@/lib/utils";
 import { CATEGORY_ACCENT } from "@/engine/connectors/catalog";
 import type { ConnectorState } from "@/engine/connectors/service";
 import { connectHubSpotAction, connectN8nAction, testConnectorAction, syncConnectorAction, disconnectConnectorAction } from "./actions";
+import { formatDateTime } from "@/lib/datetime";
+import { useTimeZone } from "@/components/time-zone";
 
 const TILE: Record<Accent, string> = { royal: "bg-royal-soft text-royal-ink", purple: "bg-purple-soft text-purple-ink", cyan: "bg-cyan-soft text-cyan-ink", emerald: "bg-emerald-soft text-emerald-ink", gold: "bg-gold-soft text-gold-ink", coral: "bg-coral-soft text-coral-ink", indigo: "bg-indigo-soft text-indigo-ink", midnight: "bg-surface-2 text-ink" };
 const STATUS_MAP: Record<string, Accent> = { connected: "emerald", configured: "purple", available: "royal", not_built: "midnight", license_required: "gold" };
 const STATUS_LABEL: Record<string, string> = { connected: "connected", configured: "configured", available: "available", not_built: "not built", license_required: "license required" };
 const HEALTH: Record<string, { label: string; cls: string }> = { healthy: { label: "Healthy", cls: "text-emerald-ink" }, failing: { label: "Failing", cls: "text-coral-ink" }, untested: { label: "Not yet tested", cls: "text-gold-ink" }, "n/a": { label: "—", cls: "text-ink-3" } };
 const initials = (n: string) => n.replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "never");
+const when = (iso: string | null, tz: string) => (iso ? formatDateTime(iso, tz, { dateStyle: "medium", timeStyle: "short" }) : "never");
 const ago = (iso: string | null) => { if (!iso) return "never"; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 
 export function Marketplace({ connectors, total, counts, filterDefs, vaultReady, initialOpen }: { connectors: ConnectorState[]; total: number; counts: { connected: number; configured: number; available: number; notBuilt: number; license: number; failing: number }; filterDefs: FilterDef[]; vaultReady: boolean; initialOpen: string | null }) {
@@ -77,6 +79,7 @@ export function Marketplace({ connectors, total, counts, filterDefs, vaultReady,
 function Row({ k, children }: { k: string; children: React.ReactNode }) { return <><dt className="text-ink-3">{k}</dt><dd className="min-w-0 break-words">{children}</dd></>; }
 
 function ConnectorDetail({ c, vaultReady }: { c: ConnectorState; vaultReady: boolean }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [busy, setBusy] = React.useState(""); const [flash, setFlash] = React.useState<{ ok: boolean; text: string } | null>(null);
   const [token, setToken] = React.useState(""); const [baseUrl, setBaseUrl] = React.useState(""); const [apiKey, setApiKey] = React.useState("");
@@ -178,8 +181,8 @@ function ConnectorDetail({ c, vaultReady }: { c: ConnectorState; vaultReady: boo
         <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
           <Row k="Status"><StatusPill status={c.status} map={STATUS_MAP} /> <span className="text-ink-3">{STATUS_LABEL[c.status]}</span></Row>
           <Row k="Health"><span className={cn("font-semibold", HEALTH[c.health].cls)}>{HEALTH[c.health].label}</span></Row>
-          <Row k="Last checked">{when(c.lastCheckedAt)}</Row>
-          <Row k="Last sync">{c.lastSyncAt ? `${when(c.lastSyncAt)} (${ago(c.lastSyncAt)})` : c.key === "hubspot" ? "never" : "no data sync for this connector"}</Row>
+          <Row k="Last checked">{when(c.lastCheckedAt, tz)}</Row>
+          <Row k="Last sync">{c.lastSyncAt ? `${when(c.lastSyncAt, tz)} (${ago(c.lastSyncAt)})` : c.key === "hubspot" ? "never" : "no data sync for this connector"}</Row>
           {c.lastError && <Row k="Last error"><span className="inline-flex items-start gap-1 text-coral-ink" data-testid="mkt-last-error"><TriangleAlert size={12} className="mt-0.5 shrink-0" />{c.lastError}</span></Row>}
         </dl>
       </section>

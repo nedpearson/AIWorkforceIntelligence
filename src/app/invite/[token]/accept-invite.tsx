@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { Button, Card, Input, Badge } from "@/components/ui";
 import { LinkButton } from "@/components/admin/link-button";
 import { acceptAsExisting, acceptAsNew } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 type Invite = { orgName: string; email: string; role: string; userExists: boolean; expiresAt: string };
 export function AcceptInvite({ token, invite, invalid, signedInAs }: { token: string; invite?: Invite; invalid?: "not_found" | "expired" | "accepted"; signedInAs?: string | null }) {
+  const tz = useTimeZone();
   const r = useRouter();
   const [name, setName] = React.useState(""); const [password, setPassword] = React.useState(""); const [password2, setPassword2] = React.useState("");
   const [loginPw, setLoginPw] = React.useState(""); const [otp, setOtp] = React.useState(""); const [needOtp, setNeedOtp] = React.useState(false);
@@ -46,7 +49,7 @@ export function AcceptInvite({ token, invite, invalid, signedInAs }: { token: st
     <Card data-testid="invite-card">
       <div className="mb-4">
         <h2 className="text-base font-semibold">You&apos;re invited to {inv.orgName}</h2>
-        <p className="mt-1 text-sm text-ink-2">as <Badge tone="brand">{inv.role}</Badge> · for <strong>{inv.email}</strong> · expires {new Date(inv.expiresAt).toLocaleDateString()}</p>
+        <p className="mt-1 text-sm text-ink-2">as <Badge tone="brand">{inv.role}</Badge> · for <strong>{inv.email}</strong> · expires {formatDate(inv.expiresAt, tz)}</p>
       </div>
       {err && <p className="mb-3 rounded-lg bg-danger-soft p-2 text-xs text-danger" role="alert" data-testid="invite-error">{err}</p>}
       {matches ? (

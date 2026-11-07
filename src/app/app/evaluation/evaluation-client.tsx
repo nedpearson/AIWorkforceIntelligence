@@ -7,6 +7,8 @@ import { CheckRow, Drawer, Meter, ScoreRing, SectionHeader, StatusPill, ExportBu
 import type { Dimension, DimensionKey, Evaluation, EvaluationSnapshot } from "@/engine/evaluation";
 import { fmtNum, fmtUSD, cn } from "@/lib/utils";
 import { saveEvaluationSnapshot, setEvaluationStatus } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime, formatDate } from "@/lib/datetime";
 
 export type SnapshotRow = { id: string; name: string; status: string; createdAt: string; snapshot: EvaluationSnapshot };
 const CONF: Record<string, string> = { high: "bg-emerald-soft text-emerald-ink", medium: "bg-gold-soft text-gold-ink", low: "bg-coral-soft text-coral-ink", none: "bg-surface-2 text-ink-3" };
@@ -37,6 +39,7 @@ function DimensionDrawer({ d, onClose }: { d: Dimension | null; onClose: () => v
 }
 
 export function EvaluationClient({ ev, snapshots, canWrite, canApprove }: { ev: Evaluation; snapshots: SnapshotRow[]; canWrite: boolean; canApprove: boolean }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [dim, setDim] = React.useState<DimensionKey | null>(null);
   const [saveOpen, setSaveOpen] = React.useState(false); const [name, setName] = React.useState("");
@@ -53,7 +56,7 @@ export function EvaluationClient({ ev, snapshots, canWrite, canApprove }: { ev: 
     <div className="min-w-0 space-y-2 [contain:inline-size]" data-testid="evaluation-page">
       <PageHeader hero eyebrow="Command · Business Evaluation" icon={<ClipboardCheck size={22} />} title="Company Transformation Score"
         subtitle="A live, evidence-based evaluation: sixteen steps from company profile to measured results, and a 0–100 score across nine dimensions. Every score shows its inputs, formula, confidence and the evidence still missing."
-        actions={<>{canWrite && <Button variant="glass" onClick={() => { setName(`Evaluation ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`); setSaveOpen(true); }} data-testid="eval-save"><Camera size={15} />Save snapshot</Button>}<Button variant="gradient" href="/present" data-testid="eval-present"><Presentation size={15} />Present findings</Button></>} />
+        actions={<>{canWrite && <Button variant="glass" onClick={() => { setName(`Evaluation ${formatDate(Date.now(), tz, { month: "short", day: "numeric", year: "numeric" })}`); setSaveOpen(true); }} data-testid="eval-save"><Camera size={15} />Save snapshot</Button>}<Button variant="gradient" href="/present" data-testid="eval-present"><Presentation size={15} />Present findings</Button></>} />
 
       <Card className="p-5 sm:p-6" data-testid="eval-score">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center">
@@ -98,13 +101,13 @@ export function EvaluationClient({ ev, snapshots, canWrite, canApprove }: { ev: 
 
       <SectionHeader accent="indigo" title="Snapshots & comparison" subtitle="Freeze the live evaluation to track progress and present it. Compare any two snapshots, or a snapshot against now." />
       {err && <p role="alert" className="rounded-lg bg-coral-soft px-3 py-2 text-xs font-medium text-coral-ink">{err}</p>}
-      {!snapshots.length ? <Empty title="No snapshots yet" body="Save a snapshot before presenting findings — it freezes the score, the 16 steps and the savings tiers so later progress can be compared." action={canWrite ? <Button onClick={() => { setName(`Baseline ${new Date().toLocaleDateString("en-US")}`); setSaveOpen(true); }} data-testid="eval-save-empty">Save baseline snapshot</Button> : undefined} /> : (
+      {!snapshots.length ? <Empty title="No snapshots yet" body="Save a snapshot before presenting findings — it freezes the score, the 16 steps and the savings tiers so later progress can be compared." action={canWrite ? <Button onClick={() => { setName(`Baseline ${formatDate(Date.now(), tz)}`); setSaveOpen(true); }} data-testid="eval-save-empty">Save baseline snapshot</Button> : undefined} /> : (
         <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
           <Table>
             <thead><tr><Th>Snapshot</Th><Th>Status</Th><Th className="text-right">Score</Th><Th className="text-right">Potential</Th><Th className="text-right">Steps</Th><Th aria-label="Actions" /></tr></thead>
             <tbody>{snapshots.map((s) => (
               <tr key={s.id} data-testid={`snap-${s.id}`}>
-                <Td><div className="font-semibold">{s.name}</div><div className="text-xs text-ink-3">{new Date(s.createdAt).toLocaleString("en-US")}</div></Td>
+                <Td><div className="font-semibold">{s.name}</div><div className="text-xs text-ink-3">{formatDateTime(s.createdAt, tz)}</div></Td>
                 <Td><StatusPill status={s.status} map={{ presented: "purple", approved: "emerald" }} /></Td>
                 <Td className="text-right tabular font-bold">{s.snapshot.score == null ? "—" : Math.round(s.snapshot.score)}</Td>
                 <Td className="text-right tabular">{fmtUSD(s.snapshot.savings.potential)}</Td>

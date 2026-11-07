@@ -11,6 +11,9 @@ import type { AgentMetrics, FailureAlert, Portfolio, PortfolioKpis } from "@/eng
 import { BUSINESS_FUNCTIONS, type BusinessFunction } from "@/engine/agents/templates";
 import { retryRun } from "./actions";
 import { ago } from "./agents-list";
+import { useTimeZone } from "@/components/time-zone";
+import { ViewerTime } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 export const FUNCTION_ACCENT: Record<BusinessFunction, Accent> = { finance: "emerald", sales: "royal", operations: "cyan", customer_service: "purple", hr: "indigo", marketing: "gold" };
 const PROVIDER_LABEL: Record<string, string> = { http_bearer: "HTTP API", quickbooks: "QuickBooks", hubspot: "HubSpot", zendesk: "Zendesk", smtp: "SMTP", n8n: "n8n" };
@@ -75,7 +78,7 @@ export function CommandCenter({ portfolio, agents, kpis, alerts, filterDefs, fil
                   <div className="mt-0.5 flex flex-wrap gap-1.5 text-[11px]">
                     {al.consecutiveFailures > 0 && <span className="rounded-full bg-coral-soft px-2 py-0.5 font-semibold text-coral-ink">{al.consecutiveFailures} in a row</span>}
                     <span className="rounded-full bg-surface-2 px-2 py-0.5 font-semibold text-ink-2">{al.failures7d} in 7 days</span>
-                    {al.lastFailedAt && <span className="text-ink-3" suppressHydrationWarning>last {ago(al.lastFailedAt)}</span>}
+                    {al.lastFailedAt && <span className="text-ink-3">last <ViewerTime dateTime={al.lastFailedAt}>{ago(al.lastFailedAt)}</ViewerTime></span>}
                   </div>
                   {al.lastError && <p className="mt-1.5 line-clamp-2 break-words font-mono text-[11px] text-coral-ink">{al.lastError}</p>}
                 </div>
@@ -107,6 +110,7 @@ function Metric({ label, value, tone, hint, onClick, testid }: { label: string; 
 }
 
 function AgentCard({ a, w, onDrill }: { a: AgentMetrics; w: number; onDrill: (title: string, d: Drill) => void }) {
+  const tz = useTimeZone();
   const net = a.netBenefit;
   return (
     <div className="card card-hover p-4" data-testid={`agent-row-${a.id}`}>
@@ -132,8 +136,8 @@ function AgentCard({ a, w, onDrill }: { a: AgentMetrics; w: number; onDrill: (ti
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3 text-[11px] text-ink-2">
         <span className="inline-flex items-center gap-1"><DollarSign size={12} className="text-ink-3" />cost {fmtUSD(a.operatingCost)}</span>
         <span className="inline-flex flex-wrap items-center gap-1"><Plug size={12} className="text-ink-3" />{a.connectedSystems.length ? a.connectedSystems.map((s) => <span key={s} className="rounded-md bg-surface-2 px-1.5 py-0.5 font-medium">{PROVIDER_LABEL[s] ?? s}</span>) : <span className="text-ink-3">no systems connected</span>}</span>
-        <span className="inline-flex items-center gap-1" suppressHydrationWarning><CircleCheck size={12} className="text-ink-3" />last success {ago(a.lastSuccessAt)}</span>
-        {a.schedule && <span className="inline-flex items-center gap-1" suppressHydrationWarning><CalendarClock size={12} className="text-ink-3" />{a.schedule.description}{a.schedule.nextRunAt && ` · next ${new Date(a.schedule.nextRunAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}`}</span>}
+        <span className="inline-flex items-center gap-1"><CircleCheck size={12} className="text-ink-3" />last success {a.lastSuccessAt ? <ViewerTime dateTime={a.lastSuccessAt}>{ago(a.lastSuccessAt)}</ViewerTime> : ago(null)}</span>
+        {a.schedule && <span className="inline-flex items-center gap-1"><CalendarClock size={12} className="text-ink-3" />{a.schedule.description}{a.schedule.nextRunAt && ` · next ${formatDateTime(a.schedule.nextRunAt, tz, { weekday: "short", hour: "numeric", minute: "2-digit" })}`}</span>}
       </div>
     </div>
   );

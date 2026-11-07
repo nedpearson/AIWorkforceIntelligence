@@ -9,6 +9,8 @@ import { ChartFrame, ChartTip } from "@/components/charts";
 import { axisProps } from "@/components/charts/theme";
 import type { RiskItem, RiskRegister, Severity } from "@/engine/risk";
 import { cn, fmtNum } from "@/lib/utils";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 // Same commitments as /app/trust (kept in sync by hand — that file does not export them).
 const COLLECTED = ["Which application is in front (program name only)", "A coarse document category derived on-device; the window title is discarded", "Time in each app, switches and idle periods — only inside the campaign schedule", "Counts, never contents (fields filled, pastes, clicks)"];
@@ -42,6 +44,7 @@ function Heatmap({ reg, onPick }: { reg: RiskRegister; onPick: (keys: string[]) 
 }
 
 export function RiskClient({ reg, severity }: { reg: RiskRegister; severity: string }) {
+  const tz = useTimeZone();
   const [only, setOnly] = React.useState<string[] | null>(null);
   const open = reg.items.filter((i) => i.open);
   const shown = reg.items.filter((i) => (!only || only.includes(i.key)) && (!severity || (severity === "open" ? i.open : i.severity === severity)));
@@ -114,7 +117,7 @@ export function RiskClient({ reg, severity }: { reg: RiskRegister; severity: str
           </div>
           <Card className="mt-3 p-0">
             <div className="border-b border-border px-4 py-2 text-xs font-bold">Last admin actions</div>
-            {reg.audit.lastAdminActions.length ? <ul className="divide-y divide-border text-xs">{reg.audit.lastAdminActions.map((a, i) => <li key={i} className="flex justify-between gap-2 px-4 py-2"><span className="font-mono">{a.action}</span><span className="whitespace-nowrap text-ink-3">{new Date(a.at).toLocaleString("en-US")}</span></li>)}</ul> : <p className="px-4 py-3 text-xs text-ink-3">No admin actions recorded yet.</p>}
+            {reg.audit.lastAdminActions.length ? <ul className="divide-y divide-border text-xs">{reg.audit.lastAdminActions.map((a, i) => <li key={i} className="flex justify-between gap-2 px-4 py-2"><span className="font-mono">{a.action}</span><span className="whitespace-nowrap text-ink-3">{formatDateTime(a.at, tz)}</span></li>)}</ul> : <p className="px-4 py-3 text-xs text-ink-3">No admin actions recorded yet.</p>}
           </Card>
         </div>
       </div>

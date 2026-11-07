@@ -5,6 +5,8 @@ import { ArrowRight, Workflow, CheckCircle2, Clock, BadgeDollarSign, Activity } 
 import { StatusPill } from "@/components/ui/enterprise";
 import { cn, fmtNum, fmtUSD } from "@/lib/utils";
 import { AiAvatar, AiBadge, TEAM_ACCENT, TILE, GRADIENT } from "./avatar";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type CardEmployee = {
   id: string; firstName: string; title: string; team: string; status: string; permissionLevel: string; portraitUrl: string | null; portraitProvenance: string | null; expertise: string[];
@@ -15,6 +17,7 @@ const STATUS_MAP = { sandbox: "cyan", pilot: "purple", active: "emerald", draft:
 export const availability = (s: string) => s === "active" ? "Available for live work" : s === "pilot" ? "Piloting with approval" : s === "sandbox" ? "Demonstrations only" : s === "paused" ? "Paused" : s === "retired" ? "Retired" : "Not yet started";
 
 export function EmployeeCard({ e, testid }: { e: CardEmployee; testid?: string }) {
+  const tz = useTimeZone();
   const accent = TEAM_ACCENT[e.team] ?? "purple";
   const s = e.stats;
   return (
@@ -39,7 +42,7 @@ export function EmployeeCard({ e, testid }: { e: CardEmployee; testid?: string }
         <Stat icon={<Clock size={12} />} label="Time saved" value={`${fmtNum(s.verifiedHours, 1)} h`} sub="verified, live only" tone="text-cyan-ink" />
         <Stat icon={<BadgeDollarSign size={12} />} label="Verified savings" value={fmtUSD(s.hardSavingsAnnual)} sub={s.capacityValue ? `${fmtUSD(s.capacityValue)} capacity` : "hard savings / yr"} tone="text-emerald-ink" />
       </dl>
-      <p className="mx-4 mt-3 flex items-center gap-1.5 truncate text-[11px] text-ink-3"><Activity size={12} className="shrink-0" />{s.lastActivity ? `${s.lastActivity.text} · ${new Date(s.lastActivity.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "No activity yet"}</p>
+      <p className="mx-4 mt-3 flex items-center gap-1.5 truncate text-[11px] text-ink-3"><Activity size={12} className="shrink-0" />{s.lastActivity ? `${s.lastActivity.text} · ${formatDate(s.lastActivity.at, tz, { month: "short", day: "numeric" })}` : "No activity yet"}</p>
       <div className="mt-auto p-4">
         <Link href={`/app/workforce/${e.id}`} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[linear-gradient(135deg,#2563eb,#6366f1_55%,#8b5cf6)] text-sm font-semibold text-white shadow-[0_8px_20px_-8px_rgba(99,102,241,.7)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo" data-testid={`meet-${e.id}`}>
           Meet {e.firstName}<ArrowRight size={15} className="transition group-hover:translate-x-0.5" />

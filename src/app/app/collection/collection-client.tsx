@@ -6,6 +6,9 @@ import { Card, CardHeader, Button, Badge, Input, Select, Textarea, Modal, Toolti
 import { cn } from "@/lib/utils";
 import type { CollectorConfig } from "@/db/schema";
 import { recordAuthorization, saveNotice, sendConsentRequest, withdrawConsentForEmployee, createEnrollmentCode, collectorAction, upsertCampaign, setCampaignStatus, runAnalysisNow } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime, formatDate, formatCount } from "@/lib/datetime";
+import { ViewerTime } from "@/components/time-zone";
 
 export type CollectionData = {
   orgTimezone: string; retentionDays: number; notice: { version: string; text: string }; appUrl: string;
@@ -21,7 +24,7 @@ export type CollectionData = {
 
 const TABS = [["authorization", "Authorization"], ["consent", "Notice & consent"], ["collectors", "Collectors"], ["campaigns", "Campaigns"]] as const;
 type Tab = (typeof TABS)[number][0];
-const fmtTs = (s: string | null | undefined) => (s ? new Date(s).toLocaleString() : "—");
+const fmtTs = (s: string | null | undefined, tz: string) => (s ? formatDateTime(s, tz) : "—");
 const ago = (s: string | null) => { if (!s) return "never"; const m = Math.round((Date.now() - new Date(s).getTime()) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -62,13 +65,14 @@ const ErrorLine = ({ err }: { err: string | null }) => (err ? <p className="text
 // ---------------- Authorization ----------------
 const DEFAULT_AUTH_TEXT = `I authorize BridgeBox to collect metadata-only workplace activity (foreground application, coarse document category, durations and counts; never keystrokes, clipboard, screenshots, URLs, window titles or message content) from the employees and departments in scope, for the purpose of identifying repetitive work that could be automated. Employees will receive the notice shown on the Data Collection page and may pause or withdraw at any time. Data is retained for the organization's configured retention period and is not used for individual performance evaluation.`;
 function AuthorizationTab({ data }: { data: CollectionData }) {
+  const tz = useTimeZone();
   const a = useAction();
   const [f, setF] = React.useState({ signerName: "", signerTitle: "", scope: "All departments", documentText: DEFAULT_AUTH_TEXT, expiresAt: "" });
   if (data.authorization) {
     const au = data.authorization;
     return (
       <Card data-testid="authorization-card">
-        <CardHeader title="Signed authorization on file" subtitle={`Signed ${fmtTs(au.signedAt)}${au.expiresAt ? ` · expires ${fmtTs(au.expiresAt)}` : ""}`} action={<Badge tone="money">Authorized</Badge>} />
+        <CardHeader title="Signed authorization on file" subtitle={`Signed ${fmtTs(au.signedAt, tz)}${au.expiresAt ? ` · expires ${fmtTs(au.expiresAt, tz)}` : ""}`} action={<Badge tone="money">Authorized</Badge>} />
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div><dt className="text-xs text-ink-3">Signed by</dt><dd className="font-medium" data-testid="auth-signer">{au.signerName}</dd><dd className="text-xs text-ink-2">{au.signerTitle}</dd></div>
           <div className="sm:col-span-2"><dt className="text-xs text-ink-3">Scope</dt><dd data-testid="auth-scope">{au.scope}</dd></div>
@@ -97,6 +101,7 @@ function AuthorizationTab({ data }: { data: CollectionData }) {
 
 // ---------------- Notice & consent ----------------
 function ConsentTab({ data }: { data: CollectionData }) {
+  const tz = useTimeZone();
   const a = useAction();
   const [text, setText] = React.useState(data.notice.text);
   const [bump, setBump] = React.useState(true);
@@ -125,7 +130,7 @@ function ConsentTab({ data }: { data: CollectionData }) {
                 <Td><div className="font-medium">{e.displayName}</div><div className="text-xs text-ink-2">{e.title ?? ""}</div></Td>
                 <Td>{e.departmentName ?? "—"}</Td>
                 <Td><Badge tone={tone[e.consent]}>{e.consent}</Badge></Td>
-                <Td className="text-xs text-ink-2">{e.consent === "withdrawn" ? fmtTs(e.withdrawnAt) : fmtTs(e.consentAt)}</Td>
+                <Td className="text-xs text-ink-2">{e.consent === "withdrawn" ? fmtTs(e.withdrawnAt, tz) : fmtTs(e.consentAt, tz)}</Td>
                 <Td className="text-right"><div className="flex justify-end gap-1">
                   {e.consent !== "acknowledged" && e.consent !== "sent" && <Button size="sm" variant="secondary" loading={a.busy} onClick={() => a.run(() => sendConsentRequest({ employeeId: e.id }))} data-testid={`consent-send-${e.id}`}>Send notice</Button>}
                   {(e.consent === "acknowledged" || e.consent === "sent") && <Button size="sm" variant="ghost" loading={a.busy} onClick={() => confirm(`Withdraw consent for ${e.displayName}? Their collector will be paused.`) && a.run(() => withdrawConsentForEmployee({ employeeId: e.id }))} data-testid={`consent-withdraw-${e.id}`}>Withdraw</Button>}
@@ -140,6 +145,7 @@ function ConsentTab({ data }: { data: CollectionData }) {
 
 // ---------------- Collectors ----------------
 function CollectorsTab({ data }: { data: CollectionData }) {
+  const tz = useTimeZone();
   const a = useAction();
   const [open, setOpen] = React.useState(false);
   const [f, setF] = React.useState({ employeeId: data.employees[0]?.id ?? "", name: "" });
@@ -155,7 +161,7 @@ function CollectorsTab({ data }: { data: CollectionData }) {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6" data-testid="monitoring-health">
         {([["Active", h.active, "money"], ["Offline", h.offline, "danger"], ["Paused", h.paused, "warn"], ["Pending install", h.pending, "info"], ["Revoked", h.revoked, "neutral"], ["Events (24h)", h.events24h, "brand"]] as const).map(([l, v, t]) => (
-          <Card key={l} className="p-4" data-testid={`health-${l.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-$/, "")}`}><div className="text-xs text-ink-2">{l}</div><div className="mt-1 flex items-center gap-2 text-xl font-semibold"><span>{v.toLocaleString()}</span>{v > 0 && l !== "Events (24h)" && <Badge tone={t}>{l === "Active" ? "ok" : l.toLowerCase()}</Badge>}</div></Card>
+          <Card key={l} className="p-4" data-testid={`health-${l.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-$/, "")}`}><div className="text-xs text-ink-2">{l}</div><div className="mt-1 flex items-center gap-2 text-xl font-semibold"><span>{formatCount(v)}</span>{v > 0 && l !== "Events (24h)" && <Badge tone={t}>{l === "Active" ? "ok" : l.toLowerCase()}</Badge>}</div></Card>
         ))}
       </div>
       <Card className="p-0">
@@ -168,8 +174,8 @@ function CollectorsTab({ data }: { data: CollectionData }) {
               <tr key={c.id} data-testid={`collector-row-${c.id}`}>
                 <Td className="font-medium">{c.name}</Td><Td>{c.employeeName ?? <span className="text-ink-3">unassigned</span>}</Td><Td className="capitalize">{c.platform}</Td>
                 <Td><Badge tone={tone[c.status]}>{c.status}</Badge></Td><Td className="text-xs">{c.version ?? "—"}</Td>
-                <Td className="text-xs text-ink-2" title={fmtTs(c.lastSeenAt)}>{ago(c.lastSeenAt)}</Td><Td className="text-right tabular-nums">{c.eventsReceived.toLocaleString()}</Td>
-                <Td className="text-xs text-ink-2">{c.pausedUntil ? `until ${fmtTs(c.pausedUntil)}` : c.status === "paused" ? "indefinitely" : "—"}</Td>
+                <Td className="text-xs text-ink-2" title={fmtTs(c.lastSeenAt, tz)}>{c.lastSeenAt ? <ViewerTime dateTime={c.lastSeenAt}>{ago(c.lastSeenAt)}</ViewerTime> : "never"}</Td><Td className="text-right tabular-nums">{formatCount(c.eventsReceived)}</Td>
+                <Td className="text-xs text-ink-2">{c.pausedUntil ? `until ${fmtTs(c.pausedUntil, tz)}` : c.status === "paused" ? "indefinitely" : "—"}</Td>
                 <Td className="text-right"><div className="flex justify-end gap-1">
                   {c.status !== "revoked" && c.status !== "pending" && (c.status === "paused"
                     ? <Button size="sm" variant="secondary" loading={a.busy} onClick={() => a.run(() => collectorAction({ collectorId: c.id, action: "resume" }))} data-testid={`collector-resume-${c.id}`}>Resume</Button>
@@ -209,6 +215,7 @@ function CollectorsTab({ data }: { data: CollectionData }) {
 type CampaignForm = { id?: string; name: string; description: string; startsAt: string; endsAt: string; departmentIds: string[]; employeeIds: string[]; useSchedule: boolean; days: number[]; start: string; end: string; titleMode: "hash" | "category" | "none"; blockedApps: string };
 const emptyForm = (): CampaignForm => ({ name: "", description: "", startsAt: localDate(new Date()), endsAt: localDate(new Date(Date.now() + 14 * 86400_000)), departmentIds: [], employeeIds: [], useSchedule: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00", titleMode: "hash", blockedApps: "" });
 function CampaignsTab({ data }: { data: CollectionData }) {
+  const tz = useTimeZone();
   const a = useAction();
   const [open, setOpen] = React.useState(false);
   const [f, setF] = React.useState<CampaignForm>(emptyForm());
@@ -232,11 +239,11 @@ function CampaignsTab({ data }: { data: CollectionData }) {
               <tr key={c.id} data-testid={`campaign-row-${c.id}`}>
                 <Td><button className="font-medium text-brand hover:underline" onClick={() => edit(c)} data-testid={`campaign-edit-${c.id}`}>{c.name}</button>{c.description && <div className="max-w-xs truncate text-xs text-ink-2">{c.description}</div>}</Td>
                 <Td><Badge tone={tone[c.status]}>{c.status}</Badge></Td>
-                <Td className="text-xs">{c.startsAt ? new Date(c.startsAt).toLocaleDateString() : "open"} → {c.endsAt ? new Date(c.endsAt).toLocaleDateString() : "open"}</Td>
+                <Td className="text-xs">{c.startsAt ? formatDate(c.startsAt, tz) : "open"} → {c.endsAt ? formatDate(c.endsAt, tz) : "open"}</Td>
                 <Td className="text-xs">{scopeLabel(c)}</Td>
                 <Td className="text-xs">{c.config.schedule ? `${c.config.schedule.days.map((d) => DAYS[d]).join(" ")} ${c.config.schedule.start}–${c.config.schedule.end}` : "any time"}</Td>
                 <Td className="text-xs">{c.config.titleMode ?? "hash"}</Td>
-                <Td className="text-right tabular-nums">{c.events.toLocaleString()}</Td>
+                <Td className="text-right tabular-nums">{formatCount(c.events)}</Td>
                 <Td className="text-xs" data-testid={`campaign-analysis-${c.id}`}>
                   {c.lastJob && c.lastJob.status !== "done" ? <span className="text-ink-2">job {c.lastJob.status}{c.lastJob.status === "failed" && c.lastJob.error ? ` — ${c.lastJob.error.split("\n")[0].slice(0, 80)}` : ""}</span>
                     : c.lastRun ? <span><Badge tone={c.lastRun.status === "done" ? "verified" : c.lastRun.status === "failed" ? "warn" : "info"}>{c.lastRun.status}</Badge> <span className="text-ink-2">{c.lastRun.status === "done" ? `${c.lastRun.workflowsFound} workflows · ${c.lastRun.opportunitiesFound} opportunities` : c.lastRun.error ? c.lastRun.error.slice(0, 80) : ""}</span></span>

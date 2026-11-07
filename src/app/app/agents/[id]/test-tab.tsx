@@ -11,10 +11,13 @@ import { cn } from "@/lib/utils";
 import type { AgentDefinition, RunLog } from "@/db/schema";
 import { testRunAgent, getRun } from "../actions";
 import type { RunRow } from "./agent-detail";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime, formatTime } from "@/lib/datetime";
 
 type Trace = { id: string; status: string; logs: RunLog[]; error: string | null; createdAt: string };
 
 export function TestTab({ agentId, definition, exampleInput, canWrite, testRuns, onDone }: { agentId: string; definition: AgentDefinition; exampleInput: Record<string, unknown>; canWrite: boolean; testRuns: RunRow[]; onDone: () => void }) {
+  const tz = useTimeZone();
   const [input, setInput] = React.useState(JSON.stringify(exampleInput ?? {}, null, 2));
   const [busy, setBusy] = React.useState(false); const [err, setErr] = React.useState("");
   const [selected, setSelected] = React.useState<string | null>(testRuns[0]?.id ?? null);
@@ -47,11 +50,11 @@ export function TestTab({ agentId, definition, exampleInput, canWrite, testRuns,
         {canWrite ? <Button onClick={run} loading={busy} variant="gradient" data-testid="test-submit"><Play size={15} />Run dry test</Button> : <p className="text-xs text-ink-3">You need agent write access to run tests.</p>}
         {testRuns.length > 0 && <div>
           <div className="mb-1 mt-2 text-xs font-semibold text-ink-2">Recent test runs</div>
-          <div className="flex flex-wrap gap-1.5">{testRuns.slice(0, 10).map((r) => <button key={r.id} onClick={() => setSelected(r.id)} aria-pressed={selected === r.id} data-testid={`test-run-${r.id}`} className={cn("rounded-lg border px-2 py-1 text-[11px]", selected === r.id ? "border-purple bg-purple-soft text-purple-ink" : "border-border text-ink-2 hover:bg-surface-2")}>{new Date(r.createdAt).toLocaleTimeString()} · {r.status}</button>)}</div>
+          <div className="flex flex-wrap gap-1.5">{testRuns.slice(0, 10).map((r) => <button key={r.id} onClick={() => setSelected(r.id)} aria-pressed={selected === r.id} data-testid={`test-run-${r.id}`} className={cn("rounded-lg border px-2 py-1 text-[11px]", selected === r.id ? "border-purple bg-purple-soft text-purple-ink" : "border-border text-ink-2 hover:bg-surface-2")}>{formatTime(r.createdAt, tz)} · {r.status}</button>)}</div>
         </div>}
       </div>
       <div className="min-w-0">
-        <SectionHeader accent="cyan" title="Step-by-step trace" subtitle={trace ? `Run ${trace.id.slice(0, 8)} · ${new Date(trace.createdAt).toLocaleString()}` : "Run a test to see what each step would do."} action={trace ? <StatusPill status={trace.status} /> : undefined} />
+        <SectionHeader accent="cyan" title="Step-by-step trace" subtitle={trace ? `Run ${trace.id.slice(0, 8)} · ${formatDateTime(trace.createdAt, tz)}` : "Run a test to see what each step would do."} action={trace ? <StatusPill status={trace.status} /> : undefined} />
         {!trace ? <Empty title="No test run selected" body="Edit the sample input and run a dry test. Each step appears here with the request it would have sent." /> : (
           <ol className="space-y-2 stagger" data-testid="test-trace">
             {trace.error && <li className="rounded-xl bg-coral-soft p-3 text-xs text-coral-ink">{trace.error}</li>}

@@ -7,6 +7,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { withTenant } from "@/db/tenant";
 import { schema } from "@/db/client";
 import { num } from "@/lib/utils";
+import { formatDate } from "@/lib/datetime";
 
 export type Progress = {
   authorizationSigned: boolean;
@@ -68,13 +69,13 @@ export async function loadProgress(orgId: string): Promise<Progress> {
 export type Step = { key: string; title: string; body: string; done: boolean; href: string; cta: string; perm?: string };
 
 /** Ordered rollout checklist derived from Progress. Used by both the onboarding page and the next-actions card. */
-export function checklist(p: Progress): Step[] {
+export function checklist(p: Progress, tz: string): Step[] {
   return [
     { key: "authorization", title: "Sign the monitoring authorization", body: "An owner or officer confirms the organization has the right to observe work activity (metadata only, never content).", done: p.authorizationSigned, href: "/app/collection?tab=authorization", cta: "Go to Authorization", perm: "collectors:manage" },
     { key: "notice", title: "Publish the employee notice", body: `Every monitored person sees what is collected and acknowledges it. ${p.consentsAcknowledged} of ${p.employeesTotal} acknowledged so far.`, done: p.noticePublished && p.consentsAcknowledged > 0, href: "/app/collection?tab=consent", cta: "Go to Notice & consent", perm: "collectors:manage" },
     { key: "collectors", title: "Enroll collectors", body: `Install the collector on the computers you want to observe. ${p.collectorsActive} of ${p.collectorsTotal} active.`, done: p.collectorsActive > 0, href: "/app/collection?tab=collectors", cta: "Go to Collectors", perm: "collectors:manage" },
     { key: "campaign", title: "Run an observation campaign", body: p.campaign ? `Latest campaign "${p.campaign.name}" is ${p.campaign.status}.` : "Pick the departments and a 2–4 week window.", done: p.campaignCompleted, href: "/app/collection?tab=campaigns", cta: "Go to Campaigns", perm: "campaigns:manage" },
-    { key: "analysis", title: "Run the workflow analysis", body: p.analysisRun ? `Last run ${p.lastAnalysisAt ? new Date(p.lastAnalysisAt).toLocaleDateString() : ""}: ${p.workflows} workflows, ${p.opportunities} opportunities.` : "Turns raw activity into workflows, scores and opportunities.", done: p.analysisRun, href: "/app/collection?tab=campaigns", cta: "Run analysis", perm: "analysis:run" },
+    { key: "analysis", title: "Run the workflow analysis", body: p.analysisRun ? `Last run ${p.lastAnalysisAt ? formatDate(p.lastAnalysisAt, tz) : ""}: ${p.workflows} workflows, ${p.opportunities} opportunities.` : "Turns raw activity into workflows, scores and opportunities.", done: p.analysisRun, href: "/app/collection?tab=campaigns", cta: "Run analysis", perm: "analysis:run" },
     { key: "approve", title: "Approve an opportunity", body: `Review the ranked list and approve the ones you want to pursue. ${p.opportunitiesApproved} approved.`, done: p.opportunitiesApproved > 0, href: "/app/opportunities", cta: "Review opportunities", perm: "opportunities:write" },
     { key: "deploy", title: "Deploy an AI agent", body: `Build an agent from an approved opportunity and switch it on. ${p.agentsDeployed} deployed.`, done: p.agentsDeployed > 0, href: p.opportunities > 0 ? "/app/opportunities" : "/app/agents/new", cta: "Build an agent", perm: "agents:write" },
     { key: "measure", title: "Record a savings measurement", body: "After a few weeks of runs, measure actual hours saved from the run ledger. This is what turns 'projected' into 'verified'.", done: p.measurements > 0, href: "/app/agents", cta: "Go to Agents", perm: "agents:write" },

@@ -5,6 +5,7 @@ import { Button, Card, CardHeader, Input, Select, Textarea, PageHeader, Tooltip,
 import { LinkButton } from "@/components/admin/link-button";
 import { createClientAction, previewCsvAction, type NewClientResult } from "@/app/admin/clients/new/actions";
 import { fmtUSD } from "@/lib/utils";
+import { formatCount } from "@/lib/datetime";
 
 type Plan = { key: string; label: string; priceMonthly: number; seats: number; agents: number; blurb: string };
 const TIMEZONES = ["America/Chicago", "America/New_York", "America/Denver", "America/Los_Angeles", "America/Phoenix", "America/Anchorage", "Pacific/Honolulu", "UTC"];
@@ -47,7 +48,7 @@ export function NewClientWizard({ plans, extraSeat, extraAgent }: { plans: Plan[
         </div>
         <ul className="space-y-1 text-sm text-ink-2">
           <li>Employees imported: <strong className="text-ink">{done.employeesCreated}</strong> in {done.departmentsCreated} new department(s)</li>
-          {done.demo && <li>Synthetic demo data: <strong className="text-ink">{done.demo.events.toLocaleString()} events</strong> from {done.demo.collectors} simulated collectors. Analysis is queued — run the worker (<code>npm run worker</code>) or <code>/api/jobs/run</code> to process it.</li>}
+          {done.demo && <li>Synthetic demo data: <strong className="text-ink">{formatCount(done.demo.events)} events</strong> from {done.demo.collectors} simulated collectors. Analysis is queued — run the worker (<code>npm run worker</code>) or <code>/api/jobs/run</code> to process it.</li>}
           <li>Integrations created as <em>not configured</em> (n8n, Stripe, Anthropic) and <em>license required</em> (Power Automate, UiPath, Mimica).</li>
         </ul>
         <div className="flex flex-wrap gap-2"><LinkButton href={`/admin/clients/${done.orgId}`} data-testid="open-client">Open client workspace</LinkButton><Button variant="secondary" href="/admin">Back to portfolio</Button></div>

@@ -5,6 +5,8 @@ import { Check, X } from "lucide-react";
 import { Card, CardHeader, Button, Badge, Table, Th, Td, Empty } from "@/components/ui";
 import type { Role } from "@/lib/rbac";
 import { withdrawMyConsent, acknowledgeMyNotice, pauseMyCollector } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime, formatDate, formatTime } from "@/lib/datetime";
 
 export type TrustData = {
   orgName: string; retentionDays: number; notice: { version: string; text: string }; role: Role; blockedApps: readonly string[];
@@ -25,9 +27,10 @@ const COLLECTED = [
 ];
 const NEVER = ["Keystrokes or what you type", "Clipboard contents", "Screenshots or screen recording", "Web addresses (URLs) or page contents", "Window titles, file names or document contents", "Emails, chats or messages", "Camera, microphone or location", "Anything from blocked apps (password managers, banking, health, personal messaging)", "Anything outside the campaign's days and hours, or while you are paused"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const fmt = (s: string | null) => (s ? new Date(s).toLocaleString() : "—");
+const fmt = (s: string | null, tz: string) => (s ? formatDateTime(s, tz) : "—");
 
 export function TrustClient({ data }: { data: TrustData }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [busy, setBusy] = React.useState(false); const [err, setErr] = React.useState<string | null>(null); const [msg, setMsg] = React.useState<string | null>(null);
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
@@ -61,7 +64,7 @@ export function TrustClient({ data }: { data: TrustData }) {
         <Card data-testid="trust-retention">
           <CardHeader title="How long it is kept" />
           <p className="text-sm">Raw activity events for {data.orgName} are deleted automatically after <span className="font-semibold" data-testid="retention-days">{data.retentionDays} days</span>. Aggregated workflow findings (no per-person events) are kept for reporting.</p>
-          <p className="mt-2 text-sm text-ink-2">{data.authorization ? <>Observation was authorized by <span className="font-medium text-ink">{data.authorization.signerName}</span> ({data.authorization.signerTitle}) on {new Date(data.authorization.signedAt).toLocaleDateString()} for: {data.authorization.scope}.</> : "No authorization has been recorded yet, so no campaign can run."} {data.runningCampaigns ? `${data.runningCampaigns} campaign${data.runningCampaigns > 1 ? "s are" : " is"} currently running.` : "No campaign is currently running."}</p>
+          <p className="mt-2 text-sm text-ink-2">{data.authorization ? <>Observation was authorized by <span className="font-medium text-ink">{data.authorization.signerName}</span> ({data.authorization.signerTitle}) on {formatDate(data.authorization.signedAt, tz)} for: {data.authorization.scope}.</> : "No authorization has been recorded yet, so no campaign can run."} {data.runningCampaigns ? `${data.runningCampaigns} campaign${data.runningCampaigns > 1 ? "s are" : " is"} currently running.` : "No campaign is currently running."}</p>
         </Card>
       </div>
       <div className="space-y-4">
@@ -70,8 +73,8 @@ export function TrustClient({ data }: { data: TrustData }) {
           {!me ? <Empty title="Not linked to an employee record" body="Your login isn't tied to a monitored employee, so there is nothing collected about you here. Ask an admin if that's wrong." /> : (
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2">Status: <span data-testid="my-consent-status" data-value={me.consent}><Badge tone={me.consent === "acknowledged" ? "money" : me.consent === "withdrawn" ? "danger" : me.consent === "sent" ? "info" : "warn"}>{me.consent}</Badge></span>{me.consentVersion && <span className="text-xs text-ink-3">notice v{me.consentVersion}{me.consentVersion !== data.notice.version ? ` (current v${data.notice.version})` : ""}</span>}</div>
-              {me.acknowledgedAt && <div className="text-xs text-ink-2">Acknowledged {fmt(me.acknowledgedAt)} via {me.method}</div>}
-              {me.withdrawnAt && <div className="text-xs text-ink-2">Withdrawn {fmt(me.withdrawnAt)}</div>}
+              {me.acknowledgedAt && <div className="text-xs text-ink-2">Acknowledged {fmt(me.acknowledgedAt, tz)} via {me.method}</div>}
+              {me.withdrawnAt && <div className="text-xs text-ink-2">Withdrawn {fmt(me.withdrawnAt, tz)}</div>}
               <div className="flex flex-wrap gap-2">
                 {me.consent === "acknowledged" || me.consent === "sent" ? <Button variant="danger" size="sm" loading={busy} onClick={() => confirm("Withdraw consent? Your collector will be paused immediately and nothing further is recorded until you acknowledge again.") && run(withdrawMyConsent, "Consent withdrawn. Your collector is paused.")} data-testid="withdraw-consent">Withdraw consent & pause my collector</Button>
                   : <Button size="sm" loading={busy} onClick={() => run(acknowledgeMyNotice, "Thanks — consent recorded.")} data-testid="acknowledge-notice">I have read the notice — record my consent</Button>}
@@ -79,7 +82,7 @@ export function TrustClient({ data }: { data: TrustData }) {
               <div className="border-t border-border pt-3">
                 <div className="mb-1 text-xs font-medium text-ink-2">Your collector{me.collectors.length === 1 ? "" : "s"}</div>
                 {!me.collectors.length ? <p className="text-xs text-ink-3" data-testid="my-collectors-empty">No collector is installed for you.</p> : me.collectors.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between gap-2 py-1 text-xs" data-testid={`my-collector-${c.id}`}><span>{c.name} <span className="text-ink-3">({c.platform})</span></span><Badge tone={c.status === "active" ? "money" : c.status === "paused" ? "warn" : "neutral"}>{c.status}{c.pausedUntil ? ` until ${new Date(c.pausedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</Badge></div>))}
+                  <div key={c.id} className="flex items-center justify-between gap-2 py-1 text-xs" data-testid={`my-collector-${c.id}`}><span>{c.name} <span className="text-ink-3">({c.platform})</span></span><Badge tone={c.status === "active" ? "money" : c.status === "paused" ? "warn" : "neutral"}>{c.status}{c.pausedUntil ? ` until ${formatTime(c.pausedUntil, tz, { hour: "2-digit", minute: "2-digit" })}` : ""}</Badge></div>))}
                 {!!me.collectors.length && <div className="mt-2 flex flex-wrap gap-2">
                   {anyActive && <><Button size="sm" variant="secondary" loading={busy} onClick={() => run(() => pauseMyCollector({ minutes: 60 }), "Paused for 1 hour.")} data-testid="pause-1h">Pause 1 hour</Button><Button size="sm" variant="secondary" loading={busy} onClick={() => run(() => pauseMyCollector({}), "Paused until you resume.")} data-testid="pause-indefinite">Pause until I resume</Button></>}
                   {anyPaused && <Button size="sm" loading={busy} onClick={() => run(() => pauseMyCollector({ resume: true }), "Resumed.")} data-testid="resume-collector">Resume</Button>}
@@ -92,7 +95,7 @@ export function TrustClient({ data }: { data: TrustData }) {
         </Card>
         {me && me.campaigns.length > 0 && <Card data-testid="trust-my-campaigns">
           <CardHeader title="Campaigns that include you" />
-          <ul className="space-y-2 text-xs">{me.campaigns.map((c) => <li key={c.id}><div className="font-medium text-sm">{c.name}</div><div className="text-ink-2">{c.startsAt ? new Date(c.startsAt).toLocaleDateString() : "open"} → {c.endsAt ? new Date(c.endsAt).toLocaleDateString() : "open"}{c.schedule ? ` · ${c.schedule.days.map((d) => DAYS[d]).join(" ")} ${c.schedule.start}–${c.schedule.end}` : " · any time"} · titles: {c.titleMode}</div></li>)}</ul>
+          <ul className="space-y-2 text-xs">{me.campaigns.map((c) => <li key={c.id}><div className="font-medium text-sm">{c.name}</div><div className="text-ink-2">{c.startsAt ? formatDate(c.startsAt, tz) : "open"} → {c.endsAt ? formatDate(c.endsAt, tz) : "open"}{c.schedule ? ` · ${c.schedule.days.map((d) => DAYS[d]).join(" ")} ${c.schedule.start}–${c.schedule.end}` : " · any time"} · titles: {c.titleMode}</div></li>)}</ul>
         </Card>}
         <Card data-testid="trust-notice">
           <CardHeader title={`The notice (v${data.notice.version})`} />

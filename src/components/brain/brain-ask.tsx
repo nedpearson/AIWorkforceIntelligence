@@ -8,11 +8,13 @@ import { askBrainAction, syncSourceAction } from "@/app/app/brain/actions";
 import type { Passage } from "@/engine/brain";
 import { CitedText, ModeBadge } from "./cited-text";
 import { CATEGORY_LABEL, fmtDate, type BrainData } from "./brain-center";
+import { useTimeZone } from "@/components/time-zone";
 
 type Answer = { answer: string; citations: { n: number; label: string; href?: string; approvedAt?: string | null }[]; passages: Passage[]; mode: "retrieval" | "llm"; fallback: boolean; note: string; simulated: boolean; asRole: string };
 const ROLES = ["owner", "admin", "manager", "employee", "consultant", "viewer"];
 
 export function BrainAsk({ data }: { data: BrainData }) {
+  const tz = useTimeZone();
   const [q, setQ] = React.useState(""); const [busy, setBusy] = React.useState(false); const [a, setA] = React.useState<Answer | null>(null); const [error, setError] = React.useState<string | null>(null);
   const [simRole, setSimRole] = React.useState(""); const [simDept, setSimDept] = React.useState("");
   const [focus, setFocus] = React.useState<number | null>(null);
@@ -59,7 +61,7 @@ export function BrainAsk({ data }: { data: BrainData }) {
               <div className="flex items-start gap-2">
                 {n && <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-purple-soft px-1 text-[10px] font-bold text-purple-ink">{n}</span>}
                 {p.kind === "fact" ? <Database size={13} className="mt-0.5 text-indigo-ink" /> : <FileText size={13} className="mt-0.5 text-purple-ink" />}
-                <div className="min-w-0 flex-1"><a href={p.citation.href} className="font-semibold text-royal-ink hover:underline">{p.citation.label}</a><div className="text-[11px] text-ink-3">{CATEGORY_LABEL[p.category] ?? p.category} · approved {fmtDate(p.approvedAt ?? null)}</div></div>
+                <div className="min-w-0 flex-1"><a href={p.citation.href} className="font-semibold text-royal-ink hover:underline">{p.citation.label}</a><div className="text-[11px] text-ink-3">{CATEGORY_LABEL[p.category] ?? p.category} · approved {fmtDate(p.approvedAt ?? null, tz)}</div></div>
               </div>
               <p className="mt-1.5 line-clamp-5 text-ink-2">{p.text}</p>
             </li>); })}</ol>
@@ -70,6 +72,7 @@ export function BrainAsk({ data }: { data: BrainData }) {
 }
 
 export function BrainSources({ data }: { data: BrainData }) {
+  const tz = useTimeZone();
   const router = useRouter(); const [busy, setBusy] = React.useState<string | null>(null); const [msg, setMsg] = React.useState<Record<string, string>>({});
   async function sync(key: string) { setBusy(key); const r = await syncSourceAction(key); setBusy(null); setMsg({ ...msg, [key]: r.ok ? r.message : r.error }); router.refresh(); }
   return (
@@ -79,7 +82,7 @@ export function BrainSources({ data }: { data: BrainData }) {
           <div className="flex items-start justify-between gap-2"><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-soft text-cyan-ink"><Plug size={15} /></span><span className="text-sm font-bold">{s.name}</span></div>
             <StatusPill status={s.status === "not_built" ? "not_connected" : s.status} map={{ not_connected: "midnight", available: "royal" }} /></div>
           <p className="mt-2 flex-1 text-xs text-ink-2">{s.description}</p>
-          <div className="mt-2 text-[11px] text-ink-3">{s.statusDetail}{s.items ? ` · ${s.items} item${s.items === 1 ? "" : "s"}` : ""}{s.lastSyncedAt ? ` · last synced ${fmtDate(s.lastSyncedAt)}` : ""}</div>
+          <div className="mt-2 text-[11px] text-ink-3">{s.statusDetail}{s.items ? ` · ${s.items} item${s.items === 1 ? "" : "s"}` : ""}{s.lastSyncedAt ? ` · last synced ${fmtDate(s.lastSyncedAt, tz)}` : ""}</div>
           {msg[s.key] && <p className="mt-2 text-xs font-semibold text-ink-2" role="status">{msg[s.key]}</p>}
           <div className="mt-3 flex gap-2">
             {s.syncable && data.perms.ingest && <Button size="sm" loading={busy === s.key} onClick={() => sync(s.key)} data-testid={`brain-source-sync-${s.key}`}><RefreshCw size={13} />Sync now</Button>}

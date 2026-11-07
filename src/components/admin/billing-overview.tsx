@@ -6,12 +6,15 @@ import { fmtUSD, cn } from "@/lib/utils";
 import { syncAllStripe, type SyncAllResult } from "@/app/admin/billing/actions";
 import { StripeNotice } from "./client-tabs-2";
 import { statusTone } from "./portfolio";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type BillingClientRow = { clientId: string; clientName: string; plan: string | null; status: string; seats: number; seatsUsed: number; agentSlots: number; agentsUsed: number; monthly: number; stripeLinked: boolean; trialEndsAt: string | null; currentPeriodEnd: string | null; agentsDeployed: number };
 type Invoice = { id: string; clientName: string; clientId: string; amountCents: number; currency: string; status: string; createdAt: string; periodStart: string | null; periodEnd: string | null; pdfUrl: string | null };
 type Economics = { plans: Record<string, { label: string; priceMonthly: number; seats: number; agents: number }>; extraSeat: number; extraAgent: number; perAgentCost: number };
 
 export function BillingOverview({ rows, mrr, trialMonthly, stripe, invoices, economics, canChange }: { rows: BillingClientRow[]; mrr: number; trialMonthly: number; stripe: { configured: boolean; missing: string[] }; invoices: Invoice[]; economics: Economics; canChange: boolean }) {
+  const tz = useTimeZone();
   const [busy, setBusy] = React.useState(false); const [res, setRes] = React.useState<SyncAllResult | null>(null);
   const agentCost = rows.reduce((s, r) => s + r.agentsDeployed, 0) * economics.perAgentCost;
   async function sync() { setBusy(true); setRes(await syncAllStripe()); setBusy(false); }
@@ -33,7 +36,7 @@ export function BillingOverview({ rows, mrr, trialMonthly, stripe, invoices, eco
             <tr key={r.clientId} data-testid={`billing-row-${r.clientId}`}>
               <Td><Link className="font-medium text-brand hover:underline" href={`/admin/clients/${r.clientId}?tab=billing`}>{r.clientName}</Link></Td><Td className="capitalize">{r.plan ?? "—"}</Td><Td><Badge tone={statusTone(r.status)}>{r.status.replace("_", " ")}</Badge></Td>
               <Td className={cn(r.seats > 0 && r.seatsUsed >= r.seats && "text-warn font-medium")}>{r.seatsUsed} / {r.seats}{r.seats > 0 && r.seatsUsed >= r.seats && <span className="ml-1 text-[10px] uppercase">full</span>}</Td><Td className={cn(r.agentsUsed > r.agentSlots && "text-warn font-medium")}>{r.agentsUsed} / {r.agentSlots}</Td>
-              <Td className="text-right">{fmtUSD(r.monthly)}</Td><Td className="text-xs">{r.stripeLinked ? <Badge tone="money">linked</Badge> : <Badge tone="neutral">local</Badge>}</Td><Td className="text-xs">{(r.status === "trialing" ? r.trialEndsAt : r.currentPeriodEnd) ? new Date((r.status === "trialing" ? r.trialEndsAt : r.currentPeriodEnd)!).toLocaleDateString() : "—"}</Td>
+              <Td className="text-right">{fmtUSD(r.monthly)}</Td><Td className="text-xs">{r.stripeLinked ? <Badge tone="money">linked</Badge> : <Badge tone="neutral">local</Badge>}</Td><Td className="text-xs">{(r.status === "trialing" ? r.trialEndsAt : r.currentPeriodEnd) ? formatDate((r.status === "trialing" ? r.trialEndsAt : r.currentPeriodEnd)!, tz) : "—"}</Td>
               <Td>{canChange && <Button size="sm" variant="secondary" href={`/admin/clients/${r.clientId}?tab=billing`}>Manage</Button>}</Td></tr>))}</tbody></Table>
         )}
         <Card>
@@ -44,7 +47,7 @@ export function BillingOverview({ rows, mrr, trialMonthly, stripe, invoices, eco
           <CardHeader title="Recent invoices" subtitle="Across all clients, from Stripe only." />
           {!invoices.length ? <p className="text-xs text-ink-2" data-testid="invoices-empty">No invoices yet. Invoices arrive through the Stripe webhook or a sync.</p> : (
             <Table><thead><tr><Th>Client</Th><Th>Date</Th><Th>Period</Th><Th>Status</Th><Th className="text-right">Amount</Th><Th></Th></tr></thead><tbody>{invoices.map((i) => (
-              <tr key={i.id}><Td className="text-xs"><Link className="text-brand hover:underline" href={`/admin/clients/${i.clientId}?tab=billing`}>{i.clientName}</Link></Td><Td className="text-xs">{new Date(i.createdAt).toLocaleDateString()}</Td><Td className="text-xs">{i.periodStart ? new Date(i.periodStart).toLocaleDateString() : "—"} → {i.periodEnd ? new Date(i.periodEnd).toLocaleDateString() : "—"}</Td><Td><Badge tone={i.status === "paid" ? "money" : i.status === "open" ? "warn" : "neutral"}>{i.status}</Badge></Td><Td className="text-right">{fmtUSD(i.amountCents / 100)} <span className="text-xs uppercase text-ink-3">{i.currency}</span></Td><Td>{i.pdfUrl && <a className="text-xs text-brand hover:underline" href={i.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}</Td></tr>))}</tbody></Table>
+              <tr key={i.id}><Td className="text-xs"><Link className="text-brand hover:underline" href={`/admin/clients/${i.clientId}?tab=billing`}>{i.clientName}</Link></Td><Td className="text-xs">{formatDate(i.createdAt, tz)}</Td><Td className="text-xs">{i.periodStart ? formatDate(i.periodStart, tz) : "—"} → {i.periodEnd ? formatDate(i.periodEnd, tz) : "—"}</Td><Td><Badge tone={i.status === "paid" ? "money" : i.status === "open" ? "warn" : "neutral"}>{i.status}</Badge></Td><Td className="text-right">{fmtUSD(i.amountCents / 100)} <span className="text-xs uppercase text-ink-3">{i.currency}</span></Td><Td>{i.pdfUrl && <a className="text-xs text-brand hover:underline" href={i.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}</Td></tr>))}</tbody></Table>
           )}
         </Card>
       </div>

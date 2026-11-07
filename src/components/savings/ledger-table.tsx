@@ -8,11 +8,13 @@ import { StatusPill } from "@/components/ui/enterprise";
 import { decideSavingsEntry } from "@/app/app/savings/actions";
 import type { LedgerRow } from "@/app/app/savings/lib";
 import { fmtNum, fmtUSD } from "@/lib/utils";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export const TIER_LABEL: Record<LedgerRow["tier"], string> = { approved: "Approved", cost_avoidance: "Cost avoidance", realized_hard: "Realized hard" };
 const TIER_TONE: Record<LedgerRow["tier"], string> = { approved: "bg-indigo-soft text-indigo-ink", cost_avoidance: "bg-purple-soft text-purple-ink", realized_hard: "bg-emerald-soft text-emerald-ink" };
 const dU = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }) : "—");
-const d = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—");
+const d = (s: string | null, tz: string) => (s ? formatDate(s, tz, { year: "numeric", month: "short", day: "numeric" }) : "—");
 
 export function TierTag({ tier }: { tier: LedgerRow["tier"] }) {
   return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${TIER_TONE[tier]}`}>{TIER_LABEL[tier]}</span>;
@@ -31,6 +33,7 @@ function Links({ r }: { r: LedgerRow }) {
 
 /** Approve / reject with reason. Warns (does not block) when the approver submitted the entry — segregation of duties. */
 export function DecideModal({ entry, mode, meId, onClose }: { entry: LedgerRow | null; mode: "approve" | "reject"; meId: string; onClose: () => void }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [reason, setReason] = React.useState(""); const [busy, setBusy] = React.useState(false); const [err, setErr] = React.useState<string | null>(null);
   React.useEffect(() => { setReason(""); setErr(null); }, [entry, mode]);
@@ -47,7 +50,7 @@ export function DecideModal({ entry, mode, meId, onClose }: { entry: LedgerRow |
         <div className="rounded-xl bg-surface-2 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-2"><TierTag tier={entry.tier} /><span className="font-semibold">{entry.title}</span></div>
           <div className="mt-1 tabular text-lg font-bold">{fmtUSD(entry.annualAmount)}<span className="text-xs font-medium text-ink-2"> / yr{entry.hoursPerYear != null ? ` · ${fmtNum(entry.hoursPerYear)} hrs/yr` : ""}</span></div>
-          <div className="mt-1 text-xs text-ink-2">Submitted by {entry.submittedBy ?? "—"} on {d(entry.createdAt)} · effective {dU(entry.effectiveFrom)}</div>
+          <div className="mt-1 text-xs text-ink-2">Submitted by {entry.submittedBy ?? "—"} on {d(entry.createdAt, tz)} · effective {dU(entry.effectiveFrom)}</div>
           <ul className="mt-2 space-y-0.5 text-xs">{entry.evidence.length ? entry.evidence.map((e, i) => <li key={i}><span className="font-semibold capitalize">{e.kind.replace(/_/g, " ")}</span>: {e.ref}{e.note ? <span className="text-ink-3"> — {e.note}</span> : null}</li>) : <li className="text-ink-3">No evidence attached</li>}</ul>
         </div>
         {self && mode === "approve" && (
@@ -69,6 +72,7 @@ export function DecideModal({ entry, mode, meId, onClose }: { entry: LedgerRow |
 }
 
 export function LedgerTable({ rows, canApprove, meId, onOpen, onDecide }: { rows: LedgerRow[]; canApprove: boolean; meId: string; onOpen: (r: LedgerRow) => void; onDecide: (r: LedgerRow, m: "approve" | "reject") => void }) {
+  const tz = useTimeZone();
   if (!rows.length) return <Empty title="No ledger entries match" body="Entries record approved business cases, cost avoidance and realized hard savings. Submit one when finance confirms a saving." />;
   return (
     <Table>
@@ -83,8 +87,8 @@ export function LedgerTable({ rows, canApprove, meId, onOpen, onDecide }: { rows
             <Td className="text-right tabular">{r.hoursPerYear != null ? fmtNum(r.hoursPerYear) : "—"}</Td>
             <Td><Links r={r} /></Td>
             <Td>{r.evidence.length ? <span className="text-xs" title={r.evidence.map((e) => `${e.kind}: ${e.ref}`).join("\n")}>{r.evidence.length} · {[...new Set(r.evidence.map((e) => e.kind.replace(/_/g, " ")))].join(", ")}</span> : <span className={r.tier === "approved" ? "text-xs text-ink-3" : "text-xs font-semibold text-coral-ink"}>none</span>}</Td>
-            <Td className="whitespace-nowrap text-xs">{r.submittedBy ?? "—"}<div className="text-ink-3">{d(r.createdAt)}</div></Td>
-            <Td className="whitespace-nowrap text-xs">{r.approvedBy ? <>{r.approvedBy}{r.approvedById === r.submittedById && <span className="ml-1 rounded bg-gold-soft px-1 text-[10px] font-semibold text-gold-ink" title="Approved by the submitter">SoD</span>}<div className="text-ink-3">{d(r.approvedAt)}</div></> : "—"}{r.rejectionReason && <div className="max-w-[12rem] truncate text-coral-ink" title={r.rejectionReason}>{r.rejectionReason}</div>}</Td>
+            <Td className="whitespace-nowrap text-xs">{r.submittedBy ?? "—"}<div className="text-ink-3">{d(r.createdAt, tz)}</div></Td>
+            <Td className="whitespace-nowrap text-xs">{r.approvedBy ? <>{r.approvedBy}{r.approvedById === r.submittedById && <span className="ml-1 rounded bg-gold-soft px-1 text-[10px] font-semibold text-gold-ink" title="Approved by the submitter">SoD</span>}<div className="text-ink-3">{d(r.approvedAt, tz)}</div></> : "—"}{r.rejectionReason && <div className="max-w-[12rem] truncate text-coral-ink" title={r.rejectionReason}>{r.rejectionReason}</div>}</Td>
             <Td className="whitespace-nowrap text-xs">{dU(r.effectiveFrom)}{r.effectiveTo && <div className="text-ink-3">to {dU(r.effectiveTo)}</div>}</Td>
             {canApprove && <Td className="whitespace-nowrap">{r.status === "submitted" ? <div className="flex gap-1"><Button size="sm" onClick={() => onDecide(r, "approve")} data-testid={`ledger-approve-${r.id}`} aria-label={`Approve ${r.title}`}><Check size={13} />Approve</Button><Button size="sm" variant="secondary" onClick={() => onDecide(r, "reject")} data-testid={`ledger-reject-${r.id}`} aria-label={`Reject ${r.title}`}><X size={13} />Reject</Button></div> : null}</Td>}
           </tr>

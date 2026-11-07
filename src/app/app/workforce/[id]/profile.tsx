@@ -18,6 +18,8 @@ import type { SkillMeta } from "@/engine/skills";
 import { SkillRunnerPanel } from "@/components/skills";
 import type { EmployeeFinancialsResult } from "@/engine/workforce/financials";
 import { updateEmployeeAction, setStatusAction, setPermissionAction, decideMemoryAction, decideRunAction, reviewRunAction, syncConnectionsAction } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate, formatDateTime } from "@/lib/datetime";
 
 type Emp = {
   id: string; firstName: string; title: string; team: string; intro: string; status: string; permissionLevel: string; portraitUrl: string | null; portraitProvenance: string | null;
@@ -196,6 +198,7 @@ function AssignTab({ e, skills, perms, catalog, demoSkill }: { e: Emp; skills: S
 }
 
 function WorkTab({ e, runs, skills, perms }: { e: Emp; runs: Run[]; skills: SkillInfo[] | null; perms: { approve: boolean; elevated: boolean } }) {
+  const tz = useTimeZone();
   const router = useRouter(); const [busy, setBusy] = React.useState<string | null>(null); const [msg, setMsg] = React.useState<string | null>(null);
   const [review, setReview] = React.useState<Run | null>(null); const [verdict, setVerdict] = React.useState<"accepted" | "corrected" | "rejected">("accepted"); const [note, setNote] = React.useState(""); const [improve, setImprove] = React.useState("");
   const decide = async (r: Run, d: "approve" | "reject") => { setBusy(r.id); const x = await decideRunAction({ skillRunId: r.id, decision: d, aiEmployeeId: e.id }); setBusy(null); setMsg(x.ok ? `Run ${d}d.` : x.error); router.refresh(); };
@@ -216,7 +219,7 @@ function WorkTab({ e, runs, skills, perms }: { e: Emp; runs: Run[]; skills: Skil
         <thead><tr><Th>When</Th><Th>Skill</Th><Th>Mode</Th><Th>Status</Th><Th>Outcome</Th><Th>Time</Th><Th>Review</Th></tr></thead>
         <tbody>{runs.map((r) => (
           <tr key={r.id} data-testid={`run-${r.id}`}>
-            <Td className="whitespace-nowrap text-xs">{new Date(r.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Td>
+            <Td className="whitespace-nowrap text-xs">{formatDateTime(r.createdAt, tz, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Td>
             <Td className="font-medium">{label(r.skillKey, skills)}</Td>
             <Td>{r.mode === "sandbox" ? <Badge tone="cyan">Synthetic sample</Badge> : <Badge tone="emerald">Live</Badge>}</Td>
             <Td><StatusPill status={r.status} /></Td>
@@ -266,13 +269,14 @@ function ConnectTab({ e, connections, perms }: { e: Emp; connections: Conn[]; pe
 }
 
 function SavingsTab({ e, f }: { e: Emp; f: EmployeeFinancialsResult }) {
+  const tz = useTimeZone();
   const [tree, setTree] = React.useState<CalcTree | null>(null);
   const t = f.totals;
   const csv = f.months.map((m) => ({ month: m.month, tasks_completed: m.tasksCompleted, live_runs: m.liveRuns, sandbox_runs_excluded: m.sandboxRuns, manual_baseline_hours: m.manualBaselineHours.toFixed(2), automated_hours: m.automatedHours.toFixed(3), human_review_hours: m.humanReviewHours.toFixed(2), verified_hours_recovered: m.verifiedHoursRecovered.toFixed(2), capacity_value_usd: m.capacityValue.toFixed(2), ai_operating_cost_usd: m.operatingCost.toFixed(2) }));
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-2">
-        <span>Last 6 months · {new Date(f.range.from).toLocaleDateString()} – {new Date(f.range.to).toLocaleDateString()} · live work only</span>
+        <span>Last 6 months · {formatDate(f.range.from, "UTC")} – {formatDate(f.range.to, tz)} · live work only</span>
         <span className="ml-auto"><ExportButton rows={csv} filename={`${e.firstName.toLowerCase()}-savings`} testid="savings-export" /></span>
       </div>
       <div className="stagger grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="savings-kpis">

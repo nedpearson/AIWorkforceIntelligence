@@ -5,6 +5,7 @@ import { schema } from "@/db/client";
 import { num, fmtUSD } from "@/lib/utils";
 import { requireConsultant, listClients } from "../_lib";
 import { Badge, Empty, PageHeader, Table, Th, Td, Button } from "@/components/ui";
+import { formatDate } from "@/lib/datetime";
 
 export const metadata = { title: "Projects — Consulting Portal" };
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function ProjectsPage() {
   const rows: { id: string; clientId: string; clientName: string; name: string; status: string; opps: number; agents: number; budget: number | null; spent: number; start: string | null; target: string | null }[] = [];
   for (const c of clients) {
     const ps = await withTenant(c.id, (tx) => tx.select().from(schema.projects).where(eq(schema.projects.orgId, c.id)).orderBy(desc(schema.projects.updatedAt)));
-    for (const p of ps) rows.push({ id: p.id, clientId: c.id, clientName: c.name, name: p.name, status: p.status, opps: (p.opportunityIds ?? []).length, agents: (p.agentIds ?? []).length, budget: p.budget != null ? num(p.budget) : null, spent: num(p.spent), start: p.startDate?.toLocaleDateString() ?? null, target: p.targetDate?.toLocaleDateString() ?? null });
+    for (const p of ps) rows.push({ id: p.id, clientId: c.id, clientName: c.name, name: p.name, status: p.status, opps: (p.opportunityIds ?? []).length, agents: (p.agentIds ?? []).length, budget: p.budget != null ? num(p.budget) : null, spent: num(p.spent), start: p.startDate ? formatDate(p.startDate, consultancy.timezone) : null, target: p.targetDate ? formatDate(p.targetDate, consultancy.timezone) : null });
   }
   const budget = rows.reduce((s, r) => s + (r.budget ?? 0), 0), spent = rows.reduce((s, r) => s + r.spent, 0);
   return (

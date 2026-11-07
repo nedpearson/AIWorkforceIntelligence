@@ -29,6 +29,22 @@ npx playwright test --project=mobile                              # only the @mo
 npx playwright show-trace test-results/<test>/trace.zip           # trace of a failed test
 ```
 
+### Server time zone (match CI and Vercel)
+
+Production (Vercel) and CI run the Next.js server in **UTC** while the browser runs in `America/Chicago`. A date or
+number formatted without an explicit `timeZone` / locale renders differently on the server and in the browser, which
+is a React hydration error (#418) that also wipes `<html data-theme>`. This box defaults to `TZ=America/Chicago`, so
+start the server in UTC locally or such bugs stay invisible:
+
+```bash
+npm run build && TZ=UTC npm run start          # then: npx playwright test
+```
+
+Format rendered dates with `src/lib/datetime.ts` (`formatDateTime` / `formatDate` / `formatTime` with the org's
+zone from `useTimeZone()` in client components, `getOrgTimeZone()` on the server). `hydration.spec.ts` runs the
+browser in UTC+14 so a viewer-local format fails whatever zone the server is in; `tests/unit/datetime.test.ts`
+rejects zone-less date formatting in `src/app` and `src/components`.
+
 `playwright.config.ts` starts the app with `npm run build && npm run start` (5-minute timeout) unless port 3000 is
 already serving; set `E2E_BASE_URL` to point at another host. The browser runs in `America/Chicago`
 (the demo organizations' time zone); override with `E2E_TZ`.
@@ -55,6 +71,7 @@ already serving; set `E2E_BASE_URL` to point at another host. The browser runs i
 | `admin-portal.spec.ts` | Portfolio shows both demo clients with projected/verified `$`; all 10 client-workspace tabs load; create a project; billing says "Stripe is not configured" with the env var names and checkout refuses honestly; team page lists members. |
 | `nav-map.ts` | Static copy of the sidebar (`NAV_GROUPS`, incl. the AI Workforce group) and `SIMPLE_NAV`: testid → path → h1 → roles, plus the documented benign console patterns. `auth.setup.ts` stores every role in Advanced mode (`bb-nav-mode:<userId>`). `nav.spec.ts` and `crawl.spec.ts` assert the rendered sidebar equals it. |
 | `crawl.spec.ts` | Owner, manager, consultancy owner × (1440 light, 1440 dark, 390 light): every nav page → 200, h1, no `Application error`, no console/page errors, no horizontal overflow. On 1440 light it clicks every enabled non-destructive control in `<main>` (≤ 60/page; destructive and state-changing controls skipped — see the file header) and writes `test-results/crawl/crawl-report.json`. "Crawl · AI Workforce modules": every AI Brain tab, every AI-employee profile tab, `/app/workforce/new`, `/app/skills-lab`, the open assistant panel (asked a question) and a tour step — owner × 3 variants + manager; lifecycle/permission/portrait/provisioning controls are never clicked. |
+| `hydration.spec.ts` | Browser in `Pacific/Kiritimati` (UTC+14) against the UTC server: every owner nav page, AI Brain and AI-employee profile tabs, workflow/opportunity/agent detail, approvals, credentials, onboarding and settings sub-pages, and every consulting-portal page and client-workspace tab load with zero page errors / console errors and `<html data-theme>` intact. |
 | `a11y.spec.ts` | axe-core (`wcag2a/2aa/21a/21aa/22aa`) on every nav page for the client owner and consultancy owner, light and dark, plus every AI Brain tab, every profile tab, builder, Skills Lab, the open assistant panel and a tour step; zero serious/critical is the bar. Report: `test-results/a11y/a11y-report.json`. |
 | `reconciliation.spec.ts` | `/app` primary KPIs = `/app/finance` = `/app/savings` to the whole dollar (saved model, Conservative preset, and a temporarily saved custom model); the Excel export from `/app` equals the UI and its sheets add up. |
 | `acceptance-ai-workforce.spec.ts` | Final acceptance scenario (real UI, no mocks): five-entry band + Command Center KPIs → `rec-charlotte` quote equals the bill-entry workflow's hours/week → Meet Charlotte (AI designation, AI intro, monogram) → chat (AI identity, citation, start-demo action) → sandbox `process_invoice` over-threshold sample (10 steps, "Synthetic sample", manual vs automated) → calculator → Start pilot (sandbox-gated) → permission read_only → draft_only → act_with_approval with confirmation; QuickBooks/NetSuite "not built" → live invoice (Gulfline Electrical, PO-24-1194, $7,640 > $5,000) → awaiting_approval → owner approves → succeeded, posted to the BridgeBox AP queue → View my work (steps + approval) → pilot-linked agent → Record measurement → verified tier up on `/app/savings` and `/app`, sandbox $0 → Executive ROI PDF. Trace always on; screenshots of steps 2, 3, 5, 9, 11 in `test-results/acceptance/`. Resets Charlotte through the UI when re-run. |

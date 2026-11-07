@@ -11,6 +11,8 @@ import type { Benchmarks, EntityType } from "@/engine/benchmark";
 import { METRICS, type MetricKey, type MetricDef } from "@/engine/benchmark.types";
 import { fmtNum, fmtUSD, cn } from "@/lib/utils";
 import { addBenchmarkDataset, deleteBenchmarkDataset } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type DatasetRow = { id: string; name: string; source: string; sourceUrl: string | null; publishedAt: string | null; sampleDescription: string; applicability: string | null; metrics: { key: string; label: string; value: number; unit: string }[]; createdAt: string };
 const TYPE_LABEL: Record<EntityType, string> = { department: "Departments", location: "Locations", business_unit: "Business units", client: "Client portfolio" };
@@ -68,6 +70,7 @@ function DatasetForm({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 export function BenchmarkingClient({ bm, datasets, initialType, canManage }: { bm: Benchmarks; datasets: DatasetRow[]; initialType: EntityType; canManage: boolean }) {
+  const tz = useTimeZone();
   const router = useRouter(); const pathname = usePathname(); const sp = useSearchParams();
   const types = (Object.keys(bm.sets) as EntityType[]).filter((k) => (bm.sets[k]?.entities.length ?? 0) > 0);
   const [type, setTypeState] = React.useState<EntityType>(initialType);
@@ -158,7 +161,7 @@ export function BenchmarkingClient({ bm, datasets, initialType, canManage }: { b
         <SectionHeader accent="indigo" title="Over time (evaluation snapshots)" subtitle="Your own progress is the most reliable benchmark." />
         <ChartFrame testid="bench-over-time" title="Transformation score by snapshot" legend={[{ label: "Score", color: ACCENT_HEX.indigo }]} height={200}>
           <div className="h-full" role="img" aria-label={`Score by snapshot: ${bm.snapshots.map((s) => `${s.name} ${s.score == null ? "n/a" : Math.round(s.score)}`).join("; ")}`}>
-            <ResponsiveContainer width="100%" height="100%"><LineChart data={bm.snapshots.map((s) => ({ ...s, label: new Date(s.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) }))} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}><CartesianGrid {...gridProps} /><XAxis dataKey="label" {...axisProps} /><YAxis {...axisProps} domain={[0, 100]} width={32} /><RTooltip content={tip((p) => { const s = p.payload?.[0]?.payload as { name: string; score: number | null; potential: number; verified: number } | undefined; return <ChartTip active={p.active} label={s?.name} rows={s ? [{ name: "Score", value: s.score == null ? "n/a" : fmtNum(s.score, 1) }, { name: "Potential", value: fmtUSD(s.potential) }, { name: "Verified", value: fmtUSD(s.verified) }] : []} />; })} /><Line dataKey="score" stroke={ACCENT_HEX.indigo} strokeWidth={2.5} dot={{ r: 4 }} isAnimationActive={false} /></LineChart></ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%"><LineChart data={bm.snapshots.map((s) => ({ ...s, label: formatDate(s.at, tz, { month: "short", day: "numeric" }) }))} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}><CartesianGrid {...gridProps} /><XAxis dataKey="label" {...axisProps} /><YAxis {...axisProps} domain={[0, 100]} width={32} /><RTooltip content={tip((p) => { const s = p.payload?.[0]?.payload as { name: string; score: number | null; potential: number; verified: number } | undefined; return <ChartTip active={p.active} label={s?.name} rows={s ? [{ name: "Score", value: s.score == null ? "n/a" : fmtNum(s.score, 1) }, { name: "Potential", value: fmtUSD(s.potential) }, { name: "Verified", value: fmtUSD(s.verified) }] : []} />; })} /><Line dataKey="score" stroke={ACCENT_HEX.indigo} strokeWidth={2.5} dot={{ r: 4 }} isAnimationActive={false} /></LineChart></ResponsiveContainer>
           </div>
         </ChartFrame>
       </>)}
@@ -168,7 +171,7 @@ export function BenchmarkingClient({ bm, datasets, initialType, canManage }: { b
         <div className="grid gap-3 md:grid-cols-2">
           {datasets.map((d) => (
             <Card key={d.id} className="card-hover" data-testid={`dataset-${d.id}`}>
-              <div className="flex items-start justify-between gap-2"><div><div className="text-sm font-bold">{d.name}</div><div className="text-xs text-ink-2">{d.source} · published {d.publishedAt ? new Date(d.publishedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—"}</div></div>
+              <div className="flex items-start justify-between gap-2"><div><div className="text-sm font-bold">{d.name}</div><div className="text-xs text-ink-2">{d.source} · published {d.publishedAt ? formatDate(d.publishedAt, tz, { year: "numeric", month: "short", day: "numeric" }) : "—"}</div></div>
                 {canManage && <Button size="sm" variant="ghost" aria-label={`Delete ${d.name}`} onClick={async () => { if (confirm(`Delete benchmark dataset “${d.name}”?`)) { await deleteBenchmarkDataset({ id: d.id }); router.refresh(); } }} data-testid={`dataset-delete-${d.id}`}><Trash2 size={14} /></Button>}</div>
               {d.sourceUrl && <a href={d.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 break-all text-xs text-royal-ink hover:underline">{d.sourceUrl}<ExternalLink size={11} /></a>}
               <p className="mt-2 text-xs text-ink-2"><b className="text-ink">Sample:</b> {d.sampleDescription}</p>

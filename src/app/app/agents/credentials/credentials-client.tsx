@@ -8,9 +8,13 @@ import { CREDENTIAL_PRESETS } from "./presets";
 import { deleteCredential } from "./actions";
 import { InlineCredentialModal } from "../new/new-agent";
 import { ago } from "../agents-list";
+import { useTimeZone } from "@/components/time-zone";
+import { ViewerTime } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 type Row = { id: string; name: string; provider: string; fields: string[]; lastUsedAt: string | null; createdAt: string; usedBy: string[] };
 export function CredentialsClient({ rows, vaultReady }: { rows: Row[]; vaultReady: boolean }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [pick, setPick] = React.useState(false); const [provider, setProvider] = React.useState<string>("http_bearer"); const [creating, setCreating] = React.useState<string | null>(null);
   const [flash, setFlash] = React.useState<{ ok: boolean; text: string } | null>(null); const [busy, setBusy] = React.useState("");
@@ -27,7 +31,7 @@ export function CredentialsClient({ rows, vaultReady }: { rows: Row[]; vaultRead
             <tr key={r.id} data-testid={`cred-row-${r.id}`}>
               <Td className="font-medium">{r.name}</Td><Td><Badge tone="neutral">{CREDENTIAL_PRESETS[r.provider]?.label ?? r.provider}</Badge></Td>
               <Td className="text-xs text-ink-2">{r.fields.map((f) => <span key={f} className="mr-1 rounded bg-surface-2 px-1.5 py-0.5 font-mono">{f}</span>)}</Td>
-              <Td className="text-xs">{r.usedBy.join(", ") || <span className="text-ink-3">—</span>}</Td><Td className="text-xs">{ago(r.lastUsedAt)}</Td><Td className="text-xs">{new Date(r.createdAt).toLocaleDateString()}</Td>
+              <Td className="text-xs">{r.usedBy.join(", ") || <span className="text-ink-3">—</span>}</Td><Td className="text-xs">{r.lastUsedAt ? <ViewerTime dateTime={r.lastUsedAt}>{ago(r.lastUsedAt)}</ViewerTime> : ago(null)}</Td><Td className="text-xs">{formatDate(r.createdAt, tz)}</Td>
               <Td><Button size="sm" variant="ghost" onClick={() => del(r.id)} loading={busy === r.id} aria-label="Delete" data-testid={`cred-delete-${r.id}`}><Trash2 size={14} /></Button></Td>
             </tr>))}</tbody>
         </Table>)}

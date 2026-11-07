@@ -5,6 +5,8 @@ import { Download, FileText, Plus } from "lucide-react";
 import { Badge, Button, Card, CardHeader, Empty, Input, Modal, PageHeader, Select, Table, Th, Td } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { generateReport } from "./actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type ReportRow = { id: string; kind: string; title: string; periodStart: string | null; periodEnd: string | null; generatedBy: string; createdAt: string; scenario: string; hasPdf: boolean };
 type Kind = "executive_roi" | "investment_proposal" | "monthly_performance";
@@ -14,10 +16,11 @@ export const REPORT_KINDS: Record<Kind, { label: string; who: string; contains: 
   investment_proposal: { label: "Investment proposal", who: "For a board, lender or budget approval", contains: ["Everything in the Executive ROI summary", "A recommendation to approve the implementation budget for the top opportunities", "Conservative-scenario floor so the ask survives scrutiny", "One-time vs recurring cost breakdown"] },
   monthly_performance: { label: "Monthly performance", who: "For a monthly check-in after agents are live", contains: ["Verified savings and hours for the period only (measured, never projected)", "Deployed agents and automation completion against the projection", "Department table with verified dollars", "Period dates on the cover"] },
 };
-const date = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—");
+const date = (s: string | null, tz: string) => (s ? formatDate(s, tz, { year: "numeric", month: "short", day: "numeric" }) : "—");
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export function ReportsClient({ rows, canGenerate, branding }: { rows: ReportRow[]; canGenerate: boolean; branding: { reportName?: string; primaryColor?: string; footer?: string; logoUrl?: string; orgName: string } }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [kind, setKind] = React.useState<Kind>("executive_roi");
@@ -63,9 +66,9 @@ export function ReportsClient({ rows, canGenerate, branding }: { rows: ReportRow
               <Td className="text-xs font-medium">{r.title}</Td>
               <Td><Badge tone="neutral">{REPORT_KINDS[r.kind as Kind]?.label ?? r.kind}</Badge></Td>
               <Td className="text-xs capitalize">{r.scenario || "—"}</Td>
-              <Td className="text-xs text-ink-2 whitespace-nowrap">{date(r.periodStart)} → {date(r.periodEnd)}</Td>
+              <Td className="text-xs text-ink-2 whitespace-nowrap">{date(r.periodStart, tz)} → {date(r.periodEnd, tz)}</Td>
               <Td className="text-xs">{r.generatedBy}</Td>
-              <Td className="text-xs whitespace-nowrap">{date(r.createdAt)}</Td>
+              <Td className="text-xs whitespace-nowrap">{date(r.createdAt, tz)}</Td>
               <Td>{r.hasPdf ? <a href={`/api/reports/${r.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline" data-testid={`reports-download-${r.id}`}><Download size={13} />PDF</a> : <span className="text-xs text-ink-3">no file</span>}</Td>
             </tr>))}</tbody>
         </Table>

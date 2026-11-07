@@ -14,6 +14,8 @@ import { ProjectDrawer } from "@/components/roadmap/project-drawer";
 import { cn, fmtUSD, fmtNum } from "@/lib/utils";
 import { moveProject, saveProject } from "./actions";
 import { createProjectFromOpportunity } from "../opportunities/actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 type View = "kanban" | "gantt" | "timeline" | "summary";
 type Kpis = { projects: number; active: number; budget: number; spent: number; target: number; verified: number; realized: number; atRisk: number };
@@ -137,6 +139,7 @@ export function RoadmapClient({ data, kpis, trees, blockers, canWrite, initialPr
 }
 
 function Timeline({ projects, onOpen, today }: { projects: RoadmapProject[]; onOpen: (id: string) => void; today: string }) {
+  const tz = useTimeZone();
   const now = new Date(today).getTime();
   const items = projects.flatMap((p) => p.milestones.map((m) => ({ p, m }))).sort((a, b) => (a.m.dueDate ?? "9999").localeCompare(b.m.dueDate ?? "9999"));
   return (
@@ -146,7 +149,7 @@ function Timeline({ projects, onOpen, today }: { projects: RoadmapProject[]; onO
           {items.map(({ p, m }) => { const overdue = m.status !== "done" && m.dueDate && new Date(m.dueDate).getTime() < now; return (
             <li key={m.id} className="relative">
               <span className={cn("absolute -left-[27px] top-1 h-3 w-3 rounded-full ring-4 ring-surface", m.status === "done" ? "bg-emerald" : overdue ? "bg-coral" : m.status === "in_progress" ? "bg-cyan" : "bg-surface-3")} />
-              <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold tabular text-ink-2">{m.dueDate ? new Date(m.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No due date"}</span><StatusPill status={overdue ? "blocked" : m.status} />{overdue && <span className="text-[10px] font-bold uppercase text-coral-ink">overdue</span>}</div>
+              <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold tabular text-ink-2">{m.dueDate ? formatDate(m.dueDate, tz, { month: "short", day: "numeric", year: "numeric" }) : "No due date"}</span><StatusPill status={overdue ? "blocked" : m.status} />{overdue && <span className="text-[10px] font-bold uppercase text-coral-ink">overdue</span>}</div>
               <div className="text-sm font-semibold">{m.name}</div>
               <button type="button" onClick={() => onOpen(p.id)} className="text-xs text-royal-ink hover:underline">{p.name}</button>
             </li>); })}

@@ -5,10 +5,12 @@ import { ExternalLink, Plug, RefreshCw, Unplug } from "lucide-react";
 import { Badge, Button, Card, CardHeader, Input, Modal } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { disconnectN8n, saveN8n, testN8n } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 export type IntegrationRow = { provider: "n8n" | "power_automate" | "uipath" | "mimica" | "stripe" | "oidc" | "anthropic"; status: "not_configured" | "configured" | "connected" | "error" | "license_required"; config: Record<string, unknown>; lastCheckedAt: string | null; lastError: string | null; hasCredential: boolean };
 type Mining = { provider: "power_automate" | "uipath" | "mimica"; status: "license_required" | "not_configured" | "configured"; requirement: string; docsUrl: string; envVars: string[]; row: IntegrationRow | null };
-const date = (s: string | null) => (s ? new Date(s).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "never");
+const date = (s: string | null, tz: string) => (s ? formatDateTime(s, tz, { dateStyle: "medium", timeStyle: "short" }) : "never");
 const NAMES: Record<string, string> = { power_automate: "Power Automate Process Mining", uipath: "UiPath Task Mining", mimica: "Mimica Mapper" };
 
 function StatusBadge({ status }: { status: string }) {
@@ -17,6 +19,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function IntegrationsClient({ n8n, anthropic, stripe, mining }: { n8n: { row: IntegrationRow | null; envConfigured: boolean; envBaseUrl: string | null; vaultReady: boolean }; anthropic: { row: IntegrationRow | null; envConfigured: boolean }; stripe: { row: IntegrationRow | null; envConfigured: boolean; webhookConfigured: boolean; canBilling: boolean }; mining: Mining[] }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [open, setOpen] = React.useState(false); const [baseUrl, setBaseUrl] = React.useState(String(n8n.row?.config.baseUrl ?? "")); const [apiKey, setApiKey] = React.useState("");
   const [busy, setBusy] = React.useState(""); const [flash, setFlash] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -36,7 +39,7 @@ export function IntegrationsClient({ n8n, anthropic, stripe, mining }: { n8n: { 
           <dl className="grid grid-cols-[110px_1fr] gap-y-1 text-xs">
             <dt className="text-ink-3">Base URL</dt><dd className="font-mono break-all">{String(n8n.row?.config.baseUrl ?? n8n.envBaseUrl ?? "—")}</dd>
             <dt className="text-ink-3">Source</dt><dd>{n8n.row?.hasCredential ? "API key in the credentials vault" : n8n.envConfigured ? "Server env (N8N_BASE_URL / N8N_API_KEY)" : "not set"}</dd>
-            <dt className="text-ink-3">Last checked</dt><dd>{date(n8n.row?.lastCheckedAt ?? null)}</dd>
+            <dt className="text-ink-3">Last checked</dt><dd>{date(n8n.row?.lastCheckedAt ?? null, tz)}</dd>
             {n8n.row?.lastError && <><dt className="text-ink-3">Last error</dt><dd className="text-danger" data-testid="integration-n8n-error">{n8n.row.lastError}</dd></>}
           </dl>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -48,7 +51,7 @@ export function IntegrationsClient({ n8n, anthropic, stripe, mining }: { n8n: { 
         </Card>
         <Card data-testid="integration-anthropic">
           <CardHeader title="Anthropic (AI model)" subtitle="Powers free-form answers in Ask BridgeBox and the LLM step inside agents. Model: claude-sonnet-4-5." action={<StatusBadge status={anthropicStatus} />} />
-          <p className="text-xs text-ink-2">The key is read from the server environment variable <code>ANTHROPIC_API_KEY</code> only. It is never accepted through this screen, stored in the database or shown here.{anthropic.row?.lastCheckedAt && <> Last checked {date(anthropic.row.lastCheckedAt)}.</>}</p>
+          <p className="text-xs text-ink-2">The key is read from the server environment variable <code>ANTHROPIC_API_KEY</code> only. It is never accepted through this screen, stored in the database or shown here.{anthropic.row?.lastCheckedAt && <> Last checked {date(anthropic.row.lastCheckedAt, tz)}.</>}</p>
           {!anthropic.envConfigured && <p className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-ink-2" data-testid="anthropic-howto">Set <code>ANTHROPIC_API_KEY</code> on the server and restart. Until then, Ask BridgeBox answers in evidence-retrieval mode and agent LLM steps are skipped (recorded as such, never faked).</p>}
         </Card>
         <Card data-testid="integration-stripe">
@@ -62,7 +65,7 @@ export function IntegrationsClient({ n8n, anthropic, stripe, mining }: { n8n: { 
             <CardHeader title={NAMES[m.provider]} subtitle="Process-mining import: pulls discovered processes into Workflows as observed data." action={<StatusBadge status={m.row?.status ?? m.status} />} />
             <p className="text-xs text-ink-2">{m.requirement}</p>
             <p className="mt-2 flex flex-wrap gap-x-1.5 gap-y-0.5 text-[11px] text-ink-3">Environment variables: {m.envVars.map((v) => <code key={v} className="break-all">{v}</code>)}</p>
-            <p className="mt-1 text-[11px] text-ink-3">Without a license you can still export processes to JSON from the vendor UI and import them (see docs/INTEGRATIONS.md). Last checked {date(m.row?.lastCheckedAt ?? null)}.</p>
+            <p className="mt-1 text-[11px] text-ink-3">Without a license you can still export processes to JSON from the vendor UI and import them (see docs/INTEGRATIONS.md). Last checked {date(m.row?.lastCheckedAt ?? null, tz)}.</p>
             <div className="mt-3"><a href={m.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline" data-testid={`${m.provider}-docs`}><ExternalLink size={12} />Vendor documentation</a></div>
           </Card>
         ))}

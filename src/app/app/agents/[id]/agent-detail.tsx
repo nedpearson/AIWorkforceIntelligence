@@ -16,6 +16,8 @@ import { CATEGORY_LABELS, type AgentCategory, type RequiredCredential } from "@/
 import { setAgentStatus, runAgentNow, retryRun, getRun, decideApproval, pushAgentToN8n, pullN8nRuns, checkN8n, recordMeasurement, updateAgentSettings } from "../actions";
 import { RUN_TONE, ago } from "../agents-list";
 import { FlowBuilder } from "./flow-builder";
+import { useTimeZone, ViewerTime } from "@/components/time-zone";
+import { formatDateTime, formatTime } from "@/lib/datetime";
 
 export type RunRow = { id: string; status: string; trigger: string; createdAt: string; startedAt: string | null; finishedAt: string | null; minutesSaved: number | null; humanMinutes: number; error: string | null; currentNodeId: string | null };
 export type ApprovalRow = { id: string; runId: string; nodeId: string; status: string; requestedAction: string; payload: Record<string, unknown>; createdAt: string; expiresAt: string | null; decisionNote: string | null; decidedAt: string | null };
@@ -26,7 +28,7 @@ type Props = { agent: AgentData; template: { description: string; requiredCreden
 const TABS = ["overview", "flow", "test", "runs", "approvals", "versions", "results"] as const;
 const TAB_LABEL: Record<(typeof TABS)[number], string> = { overview: "Overview", flow: "Flow", test: "Test environment", runs: "Runs", approvals: "Approvals", versions: "Versions", results: "Results" };
 const dur = (a: string | null, b: string | null) => { if (!a) return "—"; const ms = (b ? new Date(b).getTime() : Date.now()) - new Date(a).getTime(); return ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`; };
-const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
+const fmtDate = (iso: string | null, tz: string) => (iso ? formatDateTime(iso, tz) : "—");
 
 export function AgentDetail(p: Props) {
   const router = useRouter();
@@ -50,7 +52,7 @@ export function AgentDetail(p: Props) {
     <div>
       <PageHeader hero eyebrow="AI Agent Command Center" icon={<Bot size={22} className="text-cyan-300" />}
         title={<span className="flex flex-wrap items-center gap-2">{a.name}<StatusPill status={a.status} /></span>}
-        subtitle={`${CATEGORY_LABELS[a.category as AgentCategory] ?? a.category} · ${a.runtime} runtime · template ${a.templateKey}${latestVersion ? ` · v${latestVersion}` : ""}${a.deployedAt ? ` · deployed ${ago(a.deployedAt)}` : ""} · last run ${ago(a.lastRunAt)}`}
+        subtitle={<>{`${CATEGORY_LABELS[a.category as AgentCategory] ?? a.category} · ${a.runtime} runtime · template ${a.templateKey}${latestVersion ? ` · v${latestVersion}` : ""}`}{a.deployedAt && <> · deployed <ViewerTime dateTime={a.deployedAt}>{ago(a.deployedAt)}</ViewerTime></>} · last run {a.lastRunAt ? <ViewerTime dateTime={a.lastRunAt}>{ago(a.lastRunAt)}</ViewerTime> : ago(null)}</>}
         actions={<>
           <Button variant="glass" href="/app/agents" data-testid="agent-back"><ChevronLeft size={15} />All agents</Button>
           {p.perms.write && a.status !== "retired" && <>
@@ -160,6 +162,7 @@ function Overview({ p, act, busy }: { p: Props; act: Act; busy: string }) {
 }
 
 function Runs({ p, act, busy, drawer, setDrawer }: { p: Props; act: Act; busy: string; drawer: string | null; setDrawer: (id: string | null) => void }) {
+  const tz = useTimeZone();
   if (p.runs.length === 0) return <Empty title="No runs yet" body="Use Run now to start one with sample input. Each step is logged with its output (secrets redacted)." />;
   return (
     <>
@@ -167,7 +170,7 @@ function Runs({ p, act, busy, drawer, setDrawer }: { p: Props; act: Act; busy: s
         <thead><tr><Th>Status</Th><Th>Trigger</Th><Th>Started</Th><Th>Duration</Th><Th className="text-right">Min saved</Th><Th className="text-right">Human min</Th><Th>Error</Th></tr></thead>
         <tbody>{p.runs.map((r) => (
           <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setDrawer(r.id)} data-testid={`run-row-${r.id}`}>
-            <Td><Badge tone={RUN_TONE[r.status] ?? "neutral"}>{r.status.replace("_", " ")}</Badge></Td><Td className="text-xs">{r.trigger === "test" ? <Badge tone="purple">test · dry run</Badge> : r.trigger}</Td><Td className="text-xs">{fmtDate(r.startedAt ?? r.createdAt)}</Td><Td className="text-xs tabular">{dur(r.startedAt, r.finishedAt)}</Td>
+            <Td><Badge tone={RUN_TONE[r.status] ?? "neutral"}>{r.status.replace("_", " ")}</Badge></Td><Td className="text-xs">{r.trigger === "test" ? <Badge tone="purple">test · dry run</Badge> : r.trigger}</Td><Td className="text-xs">{fmtDate(r.startedAt ?? r.createdAt, tz)}</Td><Td className="text-xs tabular">{dur(r.startedAt, r.finishedAt)}</Td>
             <Td className="text-right tabular text-verified">{r.minutesSaved == null ? "—" : fmtNum(r.minutesSaved, 1)}</Td><Td className="text-right tabular">{fmtNum(r.humanMinutes, 1)}</Td><Td className="max-w-[260px] truncate text-xs text-danger">{r.error ?? ""}</Td>
           </tr>))}</tbody>
       </Table>
@@ -177,6 +180,7 @@ function Runs({ p, act, busy, drawer, setDrawer }: { p: Props; act: Act; busy: s
 }
 
 function RunDrawer({ runId, onClose, canWrite, canApprove, act, busy, definition }: { runId: string | null; onClose: () => void; canWrite: boolean; canApprove: boolean; act: Act; busy: string; definition: AgentDefinition }) {
+  const tz = useTimeZone();
   const [data, setData] = React.useState<{ run: { id: string; status: string; trigger: string; input: unknown; output: unknown; logs: RunLog[]; error: string | null; currentNodeId: string | null; attempt: number; minutesSaved: string | null; humanMinutes: string | null; startedAt: string | Date | null; finishedAt: string | Date | null }; approvals: { id: string; status: string; requestedAction: string; nodeId: string }[] } | null>(null);
   const [note, setNote] = React.useState("");
   React.useEffect(() => {
@@ -210,7 +214,7 @@ function RunDrawer({ runId, onClose, canWrite, canApprove, act, busy, definition
           <div>
             <div className="mb-1 text-xs font-semibold">Step log</div>
             <ol className="max-h-80 space-y-1 overflow-y-auto rounded-lg bg-surface-2 p-2 font-mono text-[11px]" data-testid="run-logs">
-              {run.logs.map((l, i) => <li key={i} className={cn(l.level === "error" ? "text-danger" : l.level === "warn" ? "text-warn" : "text-ink")}><span className="text-ink-3">{new Date(l.t).toLocaleTimeString()}</span> {l.nodeId && <span className="text-brand">[{label(l.nodeId)}]</span>} {l.msg}{l.data && <details className="ml-4 text-ink-2"><summary className="cursor-pointer">data</summary><pre className="whitespace-pre-wrap">{JSON.stringify(l.data, null, 1)}</pre></details>}</li>)}
+              {run.logs.map((l, i) => <li key={i} className={cn(l.level === "error" ? "text-danger" : l.level === "warn" ? "text-warn" : "text-ink")}><span className="text-ink-3">{formatTime(l.t, tz)}</span> {l.nodeId && <span className="text-brand">[{label(l.nodeId)}]</span>} {l.msg}{l.data && <details className="ml-4 text-ink-2"><summary className="cursor-pointer">data</summary><pre className="whitespace-pre-wrap">{JSON.stringify(l.data, null, 1)}</pre></details>}</li>)}
               {run.logs.length === 0 && <li className="text-ink-3">No log entries yet.</li>}
             </ol>
           </div>
@@ -222,6 +226,7 @@ function RunDrawer({ runId, onClose, canWrite, canApprove, act, busy, definition
 }
 
 export function Approvals({ approvals, canApprove, act, busy, showAgent }: { approvals: (ApprovalRow & { agentName?: string; agentId?: string })[]; canApprove: boolean; act: Act; busy: string; showAgent?: boolean }) {
+  const tz = useTimeZone();
   const [notes, setNotes] = React.useState<Record<string, string>>({});
   const pending = approvals.filter((x) => x.status === "pending"); const past = approvals.filter((x) => x.status !== "pending");
   if (approvals.length === 0) return <Empty title="No approvals" body="Approval steps pause a run until a person decides. Nothing is waiting." />;
@@ -233,7 +238,7 @@ export function Approvals({ approvals, canApprove, act, busy, showAgent }: { app
             <div className="min-w-0">
               {showAgent && ap.agentName && <Link href={`/app/agents/${ap.agentId}?tab=approvals`} className="text-xs font-medium text-brand hover:underline">{ap.agentName}</Link>}
               <div className="text-sm font-semibold">{ap.requestedAction}</div>
-              <div className="text-xs text-ink-3">Requested {ago(ap.createdAt)}{ap.expiresAt && ` · expires ${new Date(ap.expiresAt).toLocaleString()}`} · step {ap.nodeId}</div>
+              <div className="text-xs text-ink-3">Requested <ViewerTime dateTime={ap.createdAt}>{ago(ap.createdAt)}</ViewerTime>{ap.expiresAt && ` · expires ${formatDateTime(ap.expiresAt, tz)}`} · step {ap.nodeId}</div>
               <details className="mt-1 text-xs"><summary className="cursor-pointer text-ink-2">What the agent has so far</summary><pre className="mt-1 max-h-48 overflow-auto rounded-lg bg-surface-2 p-2 text-[11px]">{JSON.stringify(ap.payload, null, 2)}</pre></details>
             </div>
             {canApprove ? <div className="flex shrink-0 flex-col gap-2">
@@ -243,7 +248,7 @@ export function Approvals({ approvals, canApprove, act, busy, showAgent }: { app
             </div> : <Tooltip text="Only managers, admins and owners can approve."><Badge tone="neutral">view only</Badge></Tooltip>}
           </div>
         </Card>))}
-      {past.length > 0 && <Table><thead><tr>{showAgent && <Th>Agent</Th>}<Th>Request</Th><Th>Decision</Th><Th>Note</Th><Th>Decided</Th></tr></thead><tbody>{past.map((ap) => <tr key={ap.id}>{showAgent && <Td className="text-xs">{ap.agentName}</Td>}<Td className="text-xs">{ap.requestedAction}</Td><Td><Badge tone={ap.status === "approved" ? "money" : ap.status === "rejected" ? "danger" : "neutral"}>{ap.status}</Badge></Td><Td className="text-xs">{ap.decisionNote ?? ""}</Td><Td className="text-xs">{fmtDate(ap.decidedAt)}</Td></tr>)}</tbody></Table>}
+      {past.length > 0 && <Table><thead><tr>{showAgent && <Th>Agent</Th>}<Th>Request</Th><Th>Decision</Th><Th>Note</Th><Th>Decided</Th></tr></thead><tbody>{past.map((ap) => <tr key={ap.id}>{showAgent && <Td className="text-xs">{ap.agentName}</Td>}<Td className="text-xs">{ap.requestedAction}</Td><Td><Badge tone={ap.status === "approved" ? "money" : ap.status === "rejected" ? "danger" : "neutral"}>{ap.status}</Badge></Td><Td className="text-xs">{ap.decisionNote ?? ""}</Td><Td className="text-xs">{fmtDate(ap.decidedAt, tz)}</Td></tr>)}</tbody></Table>}
     </div>
   );
 }

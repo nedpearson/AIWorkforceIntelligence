@@ -14,6 +14,8 @@ import type { BrainSource } from "@/engine/brain/sources";
 import { BrainLibrary } from "./brain-library";
 import { BrainMemory, BrainReview } from "./brain-memory";
 import { BrainAsk, BrainSources } from "./brain-ask";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type BrainDoc = { id: string; title: string; status: string; version: number; category: string; departmentId: string | null; allowedRoles: string[]; mimeType: string; wordCount: number; supersedesId: string | null; createdAt: string; approvedAt: string | null; reviewEveryDays: number; stale: boolean; canApprove: boolean };
 export type BrainFact = { id: string; category: string; subject: string; statement: string; status: string; version: number; supersedesId: string | null; sourceRef: string | null; confidence: string; departmentId: string | null; createdAt: string; approvedAt: string | null; canApprove: boolean };
@@ -30,7 +32,7 @@ export type TabKey = "overview" | "library" | "facts" | "review" | "ask" | "sour
 const TAB_KEYS: TabKey[] = ["overview", "library", "facts", "review", "ask", "sources"];
 
 export const CATEGORY_LABEL: Record<string, string> = { company: "Company", policy: "Policies", procedure: "Procedures", pricing: "Pricing", product: "Products", customer: "Customers", vendor: "Vendors", terminology: "Terminology", goal: "Goals", decision: "Decisions", preference: "Preferences", system: "Systems", general: "General", ai_employee: "AI employee memory" };
-export const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+export const fmtDate = (s: string | null, tz: string) => (s ? formatDate(s, tz, { month: "short", day: "numeric", year: "numeric" }) : "—");
 
 export function BrainCenter({ data }: { data: BrainData }) {
   const router = useRouter(); const pathname = usePathname(); const sp = useSearchParams();
@@ -70,6 +72,7 @@ export function BrainCenter({ data }: { data: BrainData }) {
 }
 
 function BrainOverview({ data, onTab, onAddCategory }: { data: BrainData; onTab: (t: TabKey) => void; onAddCategory: (c: string) => void }) {
+  const tz = useTimeZone();
   const h = data.health; const router = useRouter();
   const [loading, setLoading] = React.useState(false); const [msg, setMsg] = React.useState<string | null>(null);
   const covered = h.coverage.filter((c) => c.documents + c.facts > 0).length;
@@ -125,7 +128,7 @@ function BrainOverview({ data, onTab, onAddCategory }: { data: BrainData; onTab:
           </div>
           <div className="card p-5" data-testid="brain-freshness">
             <div className="flex items-center gap-2 text-sm font-semibold"><Clock size={15} className="text-gold-ink" />Freshness</div>
-            {h.stale.length ? <ul className="mt-2 space-y-2">{h.stale.slice(0, 6).map((s) => <li key={s.id} className="flex items-start gap-2 text-xs"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-gold-ink" /><span><a className="font-semibold text-royal-ink hover:underline" href={`/app/brain?tab=library&doc=${s.id}`}>{s.title}</a> — approved {fmtDate(s.approvedAt)}, review every {s.reviewEveryDays} days. Publish a new version or re-approve.</span></li>)}</ul>
+            {h.stale.length ? <ul className="mt-2 space-y-2">{h.stale.slice(0, 6).map((s) => <li key={s.id} className="flex items-start gap-2 text-xs"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-gold-ink" /><span><a className="font-semibold text-royal-ink hover:underline" href={`/app/brain?tab=library&doc=${s.id}`}>{s.title}</a> — approved {fmtDate(s.approvedAt, tz)}, review every {s.reviewEveryDays} days. Publish a new version or re-approve.</span></li>)}</ul>
               : <p className="mt-2 text-xs text-ink-2">No approved document is past its review date.</p>}
           </div>
         </div>

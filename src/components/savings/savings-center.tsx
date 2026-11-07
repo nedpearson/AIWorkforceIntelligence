@@ -14,6 +14,8 @@ import { fmtNum, fmtUSD, cn } from "@/lib/utils";
 import { SavingsLadder, RealizedTimeline, TIMELINE_LEGEND } from "./savings-charts";
 import { SubmitEntryModal } from "./submit-entry-modal";
 import { LedgerTable, DecideModal, TierTag, TIER_LABEL } from "./ledger-table";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate, formatDateTime } from "@/lib/datetime";
 
 const SHORT: Record<TierKey, string> = {
   potential: "Potential", approved: "Approved", verifiedTime: "Verified time", capacityReleased: "Capacity", costAvoidance: "Avoidance", realizedHard: "Hard", net: "Net",
@@ -84,8 +86,9 @@ function TierDrawer({ tier, onClose, onSubmit }: { tier: Tier | null; onClose: (
 }
 
 function EntryDrawer({ entry, onClose, canApprove, onDecide }: { entry: LedgerRow | null; onClose: () => void; canApprove: boolean; onDecide: (r: LedgerRow, m: "approve" | "reject") => void }) {
+  const tz = useTimeZone();
   if (!entry) return null;
-  const dt = (s: string | null) => (s ? new Date(s).toLocaleString("en-US") : "—");
+  const dt = (s: string | null, tz: string) => (s ? formatDateTime(s, tz) : "—");
   // effective dates are calendar dates (stored at UTC midnight) — render in UTC so they never shift a day
   const dDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }) : "—");
   return (
@@ -100,8 +103,8 @@ function EntryDrawer({ entry, onClose, canApprove, onDecide }: { entry: LedgerRo
         <dt className="text-ink-2">Project</dt><dd>{entry.project?.label ?? "—"}</dd>
         <dt className="text-ink-2">Agent</dt><dd>{entry.agent ? <Link className="text-royal-ink hover:underline" href={`/app/agents/${entry.agent.id}`}>{entry.agent.label}</Link> : "—"}</dd>
         <dt className="text-ink-2">Effective</dt><dd>{dDate(entry.effectiveFrom)}{entry.effectiveTo ? ` → ${dDate(entry.effectiveTo)}` : ""}</dd>
-        <dt className="text-ink-2">Submitted</dt><dd>{entry.submittedBy ?? "—"} · {dt(entry.createdAt)}</dd>
-        <dt className="text-ink-2">{entry.status === "rejected" ? "Rejected" : "Approved"}</dt><dd>{entry.approvedBy ? `${entry.approvedBy} · ${dt(entry.approvedAt)}` : "—"}{entry.approvedById && entry.approvedById === entry.submittedById && <span className="ml-2 rounded bg-gold-soft px-1.5 py-0.5 text-[11px] font-semibold text-gold-ink">Self-approved</span>}</dd>
+        <dt className="text-ink-2">Submitted</dt><dd>{entry.submittedBy ?? "—"} · {dt(entry.createdAt, tz)}</dd>
+        <dt className="text-ink-2">{entry.status === "rejected" ? "Rejected" : "Approved"}</dt><dd>{entry.approvedBy ? `${entry.approvedBy} · ${dt(entry.approvedAt, tz)}` : "—"}{entry.approvedById && entry.approvedById === entry.submittedById && <span className="ml-2 rounded bg-gold-soft px-1.5 py-0.5 text-[11px] font-semibold text-gold-ink">Self-approved</span>}</dd>
         {entry.rejectionReason && <><dt className="text-ink-2">Reason</dt><dd className="text-coral-ink">{entry.rejectionReason}</dd></>}
       </dl>
       <h4 className="mb-1 mt-4 text-sm font-bold">Evidence</h4>
@@ -138,6 +141,7 @@ export function SavingsCenter({ si, ledger, pending, ledgerTotal, options, timel
   si: SavingsIntelligence; ledger: LedgerRow[]; pending: LedgerRow[]; ledgerTotal: number; options: LinkOptions; timeline: TimelinePoint[];
   me: { userId: string; role: string }; canSubmit: boolean; canApprove: boolean; entryId: string | null; amortizationYears: number;
 }) {
+  const tz = useTimeZone();
   const router = useRouter(); const pathname = usePathname(); const sp = useSearchParams();
   const [tierKey, setTierKey] = React.useState<TierKey | null>(null);
   const [submitOpen, setSubmitOpen] = React.useState(false);
@@ -187,7 +191,7 @@ export function SavingsCenter({ si, ledger, pending, ledgerTotal, options, timel
           <ul className="divide-y divide-border">
             {allPending.map((p) => { const row = pendingRows.find((r) => r.id === p.id); return (
               <li key={p.id} className="flex flex-wrap items-center gap-3 px-5 py-3" data-testid={`inbox-${p.id}`}>
-                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><TierTag tier={p.tier as LedgerRow["tier"]} /><span className="truncate text-sm font-semibold">{p.title}</span></div><div className="text-xs text-ink-2">{p.submittedBy ?? "External user"} · {new Date(p.createdAt).toLocaleDateString("en-US")}{p.submittedById === me.userId && <span className="ml-2 font-semibold text-gold-ink">submitted by you</span>}</div></div>
+                <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><TierTag tier={p.tier as LedgerRow["tier"]} /><span className="truncate text-sm font-semibold">{p.title}</span></div><div className="text-xs text-ink-2">{p.submittedBy ?? "External user"} · {formatDate(p.createdAt, tz)}{p.submittedById === me.userId && <span className="ml-2 font-semibold text-gold-ink">submitted by you</span>}</div></div>
                 <span className="tabular text-sm font-bold">{fmtUSD(p.amount)}/yr</span>
                 {canApprove && row && <div className="flex gap-1"><Button size="sm" onClick={() => setDecide({ r: row, m: "approve" })} data-testid={`inbox-approve-${p.id}`}>Approve</Button><Button size="sm" variant="secondary" onClick={() => setDecide({ r: row, m: "reject" })} data-testid={`inbox-reject-${p.id}`}>Reject</Button></div>}
               </li>

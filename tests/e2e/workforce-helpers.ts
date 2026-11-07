@@ -27,6 +27,8 @@ export async function ensureCharlotteLive(owner: Page, orgId: string): Promise<s
     await owner.goto(`/app/workforce/${e.id}?tab=demo`);
     await owner.getByTestId("demo-run").click();
     await expect(owner.getByTestId("demo-result")).toBeVisible({ timeout: 60_000 });
+    // A sandbox demo run by an owner promotes a draft employee to sandbox (runSkillAction), so re-read the status.
+    e = (await aiEmployeeByPersona(orgId, "charlotte"))!;
     await owner.goto(`/app/workforce/${e.id}?tab=customize`);
     if (e.status === "draft") { await owner.getByTestId("st-sandbox").click(); await expect(owner.locator("main")).toContainText("Status: sandbox"); }
     await owner.getByTestId("st-pilot").click();

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CheckCircle2, Circle, ArrowRight, Lock } from "lucide-react";
-import { requireCtx } from "@/lib/session";
+import { requireCtx, getOrgTimeZone } from "@/lib/session";
 import { can, type Permission } from "@/lib/rbac";
 import { Button, PageHeader } from "@/components/ui";
 import { loadProgress, checklist } from "./progress";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPage() {
   const ctx = await requireCtx();
   const progress = await loadProgress(ctx.orgId);
-  const steps = checklist(progress);
+  const steps = checklist(progress, await getOrgTimeZone(ctx.orgId));
   const done = steps.filter((s) => s.done).length;
   const next = steps.find((s) => !s.done);
   return (

@@ -14,6 +14,8 @@ import { OpportunityActions } from "@/components/dashboard/opportunity-actions";
 import { OPP_TYPE_LABEL, OPP_TYPE_ACCENT } from "@/components/dashboard/opportunity-card";
 import { cn, fmtUSD, fmtNum, fmtPct } from "@/lib/utils";
 import { createProjectFromOpportunity, submitBusinessCase } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 export type ReportData = {
   a: OpportunityAnalysis; splits: { value: number; effort: number }; totalRanked: number;
@@ -46,6 +48,7 @@ const STEPS = [
 ];
 
 export function OpportunityReport({ data }: { data: ReportData }) {
+  const tz = useTimeZone();
   const { a } = data; const l = a.line; const ans = a.answers;
   const router = useRouter();
   const [drill, setDrill] = React.useState<{ title: string; drill: Drill } | null>(null);
@@ -279,7 +282,7 @@ export function OpportunityReport({ data }: { data: ReportData }) {
               <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold"><History size={13} />Decision history</h4>
               {data.decisions.length === 0 ? <p className="text-[11px] text-ink-3">No decisions recorded yet.</p> : (
                 <ol className="relative space-y-3 border-l border-border pl-4" data-testid="opp-decision-history">
-                  {data.decisions.map((d) => <li key={d.id} className="relative"><span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ring-2 ring-surface" style={{ background: ACCENT_HEX[DECISION_ACCENT[d.decision] ?? "midnight"] }} /><div className="text-xs font-semibold">{DECISION_LABEL[d.decision] ?? d.decision}</div><div className="text-[11px] text-ink-3">{d.by} · {new Date(d.at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</div>{d.note && <p className="mt-0.5 text-[11px] text-ink-2">“{d.note}”</p>}</li>)}
+                  {data.decisions.map((d) => <li key={d.id} className="relative"><span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ring-2 ring-surface" style={{ background: ACCENT_HEX[DECISION_ACCENT[d.decision] ?? "midnight"] }} /><div className="text-xs font-semibold">{DECISION_LABEL[d.decision] ?? d.decision}</div><div className="text-[11px] text-ink-3">{d.by} · {formatDateTime(d.at, tz, { dateStyle: "medium", timeStyle: "short" })}</div>{d.note && <p className="mt-0.5 text-[11px] text-ink-2">“{d.note}”</p>}</li>)}
                 </ol>
               )}
             </div>
@@ -304,7 +307,7 @@ export function OpportunityReport({ data }: { data: ReportData }) {
           <CardHeader className="px-5 pt-5" title="Sample events" subtitle={`${data.events.length} of ${a.evidence.eventIds.length} referenced events shown`} />
           {data.events.length === 0 ? <p className="px-5 pb-5 text-xs text-ink-3">No sample events are referenced by this opportunity.</p> : (
             <Table className="rounded-t-none border-0 shadow-none"><thead><tr><Th>When</Th><Th>App</Th><Th>Event</Th><Th>Category</Th><Th className="text-right">Duration</Th></tr></thead>
-              <tbody>{data.events.map((e) => <tr key={e.id}><Td className="whitespace-nowrap text-xs">{new Date(e.ts).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })}</Td><Td className="text-xs font-medium">{e.app}</Td><Td className="text-xs">{e.type.replace(/_/g, " ")}</Td><Td className="text-xs text-ink-2">{e.titleCategory ?? "—"}</Td><Td className="text-right text-xs tabular">{fmtNum(e.durationMs / 1000, 0)}s</Td></tr>)}</tbody></Table>
+              <tbody>{data.events.map((e) => <tr key={e.id}><Td className="whitespace-nowrap text-xs">{formatDateTime(e.ts, tz, { dateStyle: "short", timeStyle: "short" })}</Td><Td className="text-xs font-medium">{e.app}</Td><Td className="text-xs">{e.type.replace(/_/g, " ")}</Td><Td className="text-xs text-ink-2">{e.titleCategory ?? "—"}</Td><Td className="text-right text-xs tabular">{fmtNum(e.durationMs / 1000, 0)}s</Td></tr>)}</tbody></Table>
           )}
         </Card>
       </div>

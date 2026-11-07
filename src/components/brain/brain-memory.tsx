@@ -7,11 +7,13 @@ import { StatusPill, SectionHeader } from "@/components/ui/enterprise";
 import { cn } from "@/lib/utils";
 import { proposeFactAction, decideAction, learnFromPlatformAction } from "@/app/app/brain/actions";
 import { CATEGORY_LABEL, fmtDate, type BrainData, type BrainFact } from "./brain-center";
+import { useTimeZone } from "@/components/time-zone";
 
 const CATS = ["company", "policy", "procedure", "pricing", "product", "customer", "vendor", "terminology", "goal", "decision", "preference", "system", "general"];
 const sourceLabel = (ref: string | null) => !ref ? null : ref.startsWith("bridgebox:") ? "Derived from BridgeBox data" : ref.startsWith("hubspot:") ? "Derived from HubSpot" : "Derived";
 
 export function BrainMemory({ data, deptName, highlight }: { data: BrainData; deptName: Map<string, string>; highlight: string | null }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [edit, setEdit] = React.useState<{ fact?: BrainFact; category: string } | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null); const [msg, setMsg] = React.useState<string | null>(null);
@@ -40,7 +42,7 @@ export function BrainMemory({ data, deptName, highlight }: { data: BrainData; de
                 <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3">
                   {sourceLabel(f.sourceRef) && <Badge tone="cyan">{sourceLabel(f.sourceRef)}</Badge>}
                   {f.version > 1 && <Badge tone="purple">v{f.version} correction</Badge>}
-                  <span>{f.departmentId ? deptName.get(f.departmentId) : "Org-wide"} · {f.approvedAt ? `approved ${fmtDate(f.approvedAt)}` : `proposed ${fmtDate(f.createdAt)}`}</span>
+                  <span>{f.departmentId ? deptName.get(f.departmentId) : "Org-wide"} · {f.approvedAt ? `approved ${fmtDate(f.approvedAt, tz)}` : `proposed ${fmtDate(f.createdAt, tz)}`}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {f.status === "pending_review" && f.canApprove && <><Button size="sm" loading={busy === f.id + "approve"} onClick={() => decide(f, "approve")} data-testid={`brain-fact-approve-${f.id}`}><CheckCircle2 size={13} />Approve</Button><Button size="sm" variant="ghost" loading={busy === f.id + "reject"} onClick={() => decide(f, "reject")} data-testid={`brain-fact-reject-${f.id}`}><XCircle size={13} />Reject</Button></>}
@@ -82,6 +84,7 @@ function FactModal({ data, init, onClose, onDone }: { data: BrainData; init: { f
 }
 
 export function BrainReview({ data, deptName }: { data: BrainData; deptName: Map<string, string> }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [kind, setKind] = React.useState<"" | "document" | "fact" | "memory">("");
   const [sel, setSel] = React.useState<Set<string>>(new Set()); const [busy, setBusy] = React.useState<string | null>(null); const [msg, setMsg] = React.useState<string | null>(null);
@@ -117,7 +120,7 @@ export function BrainReview({ data, deptName }: { data: BrainData; deptName: Map
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5"><span className="text-sm font-semibold">{i.title}</span>{i.kind === "memory" && <Badge tone="purple">AI Agent memory</Badge>}{i.derived && <Badge tone="cyan">Derived</Badge>}{(i.version ?? 1) > 1 && <Badge tone="purple">v{i.version}</Badge>}</div>
               <p className="mt-0.5 line-clamp-2 text-xs text-ink-2">{i.detail}</p>
-              <div className="mt-1 text-[11px] text-ink-3">{CATEGORY_LABEL[i.category] ?? i.category} · {i.departmentId ? deptName.get(i.departmentId) ?? "Department" : "Org-wide"} · {fmtDate(i.createdAt)}{!i.canApprove && " · outside your approval scope"}</div>
+              <div className="mt-1 text-[11px] text-ink-3">{CATEGORY_LABEL[i.category] ?? i.category} · {i.departmentId ? deptName.get(i.departmentId) ?? "Department" : "Org-wide"} · {fmtDate(i.createdAt, tz)}{!i.canApprove && " · outside your approval scope"}</div>
             </div>
             {i.canApprove && <div className="flex shrink-0 flex-col gap-1 sm:flex-row"><Button size="sm" loading={busy === "approve" + i.id} onClick={() => run("approve", [i.id])} data-testid={`brain-review-approve-${i.id}`} aria-label={`Approve ${i.title}`}><CheckCircle2 size={13} /></Button><Button size="sm" variant="ghost" loading={busy === "reject" + i.id} onClick={() => run("reject", [i.id])} data-testid={`brain-review-reject-${i.id}`} aria-label={`Reject ${i.title}`}><XCircle size={13} /></Button></div>}
           </li>); })}</ul>

@@ -7,6 +7,8 @@ import type { SeatUsage } from "@/engine/billing";
 import { upsertProject, deleteProject, setPlanLocal, startCheckout, openPortal, syncStripe, generateReportAction } from "@/app/admin/clients/[id]/actions";
 import { useAction, ErrorNote } from "./client-workspace";
 import { statusTone } from "./portfolio";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate, formatDateTime } from "@/lib/datetime";
 
 // ---------- Projects ----------
 export type ProjectRow = { id: string; name: string; status: string; opportunityIds: string[]; agentIds: string[]; budget: number | null; spent: number; startDate: string | null; targetDate: string | null; ownerUserId: string | null; notes: string | null; clientName?: string; clientId?: string };
@@ -72,6 +74,7 @@ export function StripeNotice({ stripe }: { stripe: { configured: boolean; missin
   return <div className="rounded-lg bg-warn-soft p-3 text-xs text-warn" data-testid="stripe-not-configured"><span className="font-medium">Stripe is not configured.</span> Checkout, portal and sync are disabled until these environment variables are set: <code className="font-mono">{stripe.missing.join(", ")}</code>. Plans can still be set locally (trial / manual invoicing). See docs/BILLING.md.</div>;
 }
 export function BillingTab({ d, clientId }: { d: BillingData; clientId: string }) {
+  const tz = useTimeZone();
   const a = useAction();
   const [plan, setPlan] = React.useState(d.sub?.plan ?? "starter"); const [seats, setSeats] = React.useState(String(d.sub?.seats ?? 10)); const [agents, setAgents] = React.useState(String(d.sub?.agentSlots ?? 3)); const [status, setStatus] = React.useState(d.sub?.status ?? "trialing");
   const p = d.plans.find((x) => x.key === plan)!;
@@ -94,7 +97,7 @@ export function BillingTab({ d, clientId }: { d: BillingData; clientId: string }
               <div><dt className="text-xs text-ink-3">Seats (monitored employees)</dt><dd className={cn("font-medium", u && u.used >= u.seats && "text-warn")} data-testid="billing-seats">{u ? `${u.used} used of ` : ""}{d.sub.seats}</dd></div>
               <div><dt className="text-xs text-ink-3">Agent slots</dt><dd className={cn("font-medium", u?.overAgents && "text-warn")}>{u ? `${u.agentsUsed} used of ` : ""}{d.sub.agentSlots}</dd></div>
               <div><dt className="text-xs text-ink-3">Monthly list price</dt><dd className="font-medium" data-testid="billing-monthly">{fmtUSD(d.sub.monthly.total)}<span className="text-xs font-normal text-ink-3"> = {fmtUSD(d.sub.monthly.base)}{d.sub.monthly.extraSeatCount ? ` + ${d.sub.monthly.extraSeatCount} seats` : ""}{d.sub.monthly.extraAgentCount ? ` + ${d.sub.monthly.extraAgentCount} agent slots` : ""}</span></dd></div>
-              <div><dt className="text-xs text-ink-3">{d.sub.status === "trialing" ? "Trial ends" : "Current period ends"}</dt><dd className="font-medium">{(d.sub.status === "trialing" ? d.sub.trialEndsAt : d.sub.currentPeriodEnd) ? new Date((d.sub.status === "trialing" ? d.sub.trialEndsAt : d.sub.currentPeriodEnd)!).toLocaleDateString() : "—"}</dd></div>
+              <div><dt className="text-xs text-ink-3">{d.sub.status === "trialing" ? "Trial ends" : "Current period ends"}</dt><dd className="font-medium">{(d.sub.status === "trialing" ? d.sub.trialEndsAt : d.sub.currentPeriodEnd) ? formatDate((d.sub.status === "trialing" ? d.sub.trialEndsAt : d.sub.currentPeriodEnd)!, tz) : "—"}</dd></div>
               <div className="col-span-2"><dt className="text-xs text-ink-3">Stripe</dt><dd className="font-mono text-xs">{d.sub.stripeCustomerId ?? "no customer"} · {d.sub.stripeSubscriptionId ?? "no subscription"}</dd></div>
             </dl>
           )}
@@ -127,7 +130,7 @@ export function BillingTab({ d, clientId }: { d: BillingData; clientId: string }
         <CardHeader title="Invoices" subtitle="From Stripe webhooks and sync. Nothing here is generated locally." />
         {!d.invoices.length ? <p className="text-xs text-ink-2" data-testid="invoices-empty">No invoices yet.</p> : (
           <Table><thead><tr><Th>Date</Th><Th>Period</Th><Th>Status</Th><Th className="text-right">Amount</Th><Th>Lines</Th><Th></Th></tr></thead><tbody>{d.invoices.map((i) => (
-            <tr key={i.id} data-testid={`invoice-row-${i.id}`}><Td className="text-xs">{new Date(i.createdAt).toLocaleDateString()}</Td><Td className="text-xs">{i.periodStart ? new Date(i.periodStart).toLocaleDateString() : "—"} → {i.periodEnd ? new Date(i.periodEnd).toLocaleDateString() : "—"}</Td><Td><Badge tone={i.status === "paid" ? "money" : i.status === "open" ? "warn" : i.status === "uncollectible" ? "danger" : "neutral"}>{i.status}</Badge></Td><Td className="text-right">{fmtUSD(i.amountCents / 100)} <span className="text-xs uppercase text-ink-3">{i.currency}</span></Td><Td className="text-xs text-ink-2">{i.lines.map((l) => `${l.qty}× ${l.description}`).join("; ") || "—"}</Td><Td>{i.pdfUrl && <a className="text-xs text-brand hover:underline" href={i.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}</Td></tr>))}</tbody></Table>
+            <tr key={i.id} data-testid={`invoice-row-${i.id}`}><Td className="text-xs">{formatDate(i.createdAt, tz)}</Td><Td className="text-xs">{i.periodStart ? formatDate(i.periodStart, tz) : "—"} → {i.periodEnd ? formatDate(i.periodEnd, tz) : "—"}</Td><Td><Badge tone={i.status === "paid" ? "money" : i.status === "open" ? "warn" : i.status === "uncollectible" ? "danger" : "neutral"}>{i.status}</Badge></Td><Td className="text-right">{fmtUSD(i.amountCents / 100)} <span className="text-xs uppercase text-ink-3">{i.currency}</span></Td><Td className="text-xs text-ink-2">{i.lines.map((l) => `${l.qty}× ${l.description}`).join("; ") || "—"}</Td><Td>{i.pdfUrl && <a className="text-xs text-brand hover:underline" href={i.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}</Td></tr>))}</tbody></Table>
         )}
       </Card>
     </div>
@@ -158,9 +161,10 @@ export function ReportsTab({ d, clientId, clientName }: { d: ReportsData; client
   );
 }
 export function ReportList({ reports, showClient }: { reports: ReportRow[]; showClient?: boolean }) {
+  const tz = useTimeZone();
   if (!reports.length) return <Empty title="No reports yet" body="Generate an executive ROI or monthly performance report above." />;
   return (
     <Table><thead><tr>{showClient && <Th>Client</Th>}<Th>Report</Th><Th>Period</Th><Th>Generated</Th><Th></Th></tr></thead><tbody>{reports.map((r) => (
-      <tr key={r.id} data-testid={`report-row-${r.id}`}>{showClient && <Td className="text-xs"><Link className="text-brand hover:underline" href={`/admin/clients/${r.clientId}?tab=reports`}>{r.clientName}</Link></Td>}<Td><div className="font-medium">{r.title}</div><div className="text-xs text-ink-2">{REPORT_LABELS[r.kind] ?? r.kind}</div></Td><Td className="text-xs">{r.periodStart ? new Date(r.periodStart).toLocaleDateString() : "—"} → {r.periodEnd ? new Date(r.periodEnd).toLocaleDateString() : "—"}</Td><Td className="text-xs">{new Date(r.createdAt).toLocaleString()}</Td><Td>{r.hasPdf ? <a className="text-xs text-brand hover:underline" href={`/api/admin/reports/${r.id}?org=${r.clientId}`} target="_blank" rel="noreferrer" data-testid={`report-download-${r.id}`}>Download PDF</a> : <span className="text-xs text-ink-3">no PDF</span>}</Td></tr>))}</tbody></Table>
+      <tr key={r.id} data-testid={`report-row-${r.id}`}>{showClient && <Td className="text-xs"><Link className="text-brand hover:underline" href={`/admin/clients/${r.clientId}?tab=reports`}>{r.clientName}</Link></Td>}<Td><div className="font-medium">{r.title}</div><div className="text-xs text-ink-2">{REPORT_LABELS[r.kind] ?? r.kind}</div></Td><Td className="text-xs">{r.periodStart ? formatDate(r.periodStart, tz) : "—"} → {r.periodEnd ? formatDate(r.periodEnd, tz) : "—"}</Td><Td className="text-xs">{formatDateTime(r.createdAt, tz)}</Td><Td>{r.hasPdf ? <a className="text-xs text-brand hover:underline" href={`/api/admin/reports/${r.id}?org=${r.clientId}`} target="_blank" rel="noreferrer" data-testid={`report-download-${r.id}`}>Download PDF</a> : <span className="text-xs text-ink-3">no PDF</span>}</Td></tr>))}</tbody></Table>
   );
 }

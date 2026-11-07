@@ -11,18 +11,19 @@ import { getCtx, listUserOrgs } from "@/lib/session";
 import { db, schema } from "@/db/client";
 import { assertClientOfConsultancy, OnboardingError } from "@/engine/onboarding";
 import type { Ctx } from "@/lib/auth";
+import { DEFAULT_TIME_ZONE } from "@/lib/datetime";
 
 export const CONSULTANT_ROLES = ["owner", "admin", "consultant"] as const;
 export type ConsultantRole = (typeof CONSULTANT_ROLES)[number];
-export type ConsultantCtx = { ctx: Ctx; consultancy: { id: string; name: string; role: ConsultantRole; branding: NonNullable<typeof schema.organizations.$inferSelect["branding"]> }; orgs: Awaited<ReturnType<typeof listUserOrgs>> };
+export type ConsultantCtx = { ctx: Ctx; consultancy: { id: string; name: string; role: ConsultantRole; timezone: string; branding: NonNullable<typeof schema.organizations.$inferSelect["branding"]> }; orgs: Awaited<ReturnType<typeof listUserOrgs>> };
 
 export async function getConsultant(): Promise<ConsultantCtx | null> {
   const ctx = await getCtx(); if (!ctx) return null;
   const orgs = await listUserOrgs(ctx.userId);
   const c = orgs.find((o) => o.kind === "consultancy" && (CONSULTANT_ROLES as readonly string[]).includes(o.role));
   if (!c) return null;
-  const [org] = await db.select({ branding: schema.organizations.branding }).from(schema.organizations).where(eq(schema.organizations.id, c.id)).limit(1);
-  return { ctx, consultancy: { id: c.id, name: c.name, role: c.role as ConsultantRole, branding: org?.branding ?? {} }, orgs };
+  const [org] = await db.select({ branding: schema.organizations.branding, timezone: schema.organizations.timezone }).from(schema.organizations).where(eq(schema.organizations.id, c.id)).limit(1);
+  return { ctx, consultancy: { id: c.id, name: c.name, role: c.role as ConsultantRole, timezone: org?.timezone ?? DEFAULT_TIME_ZONE, branding: org?.branding ?? {} }, orgs };
 }
 export async function requireConsultant(): Promise<ConsultantCtx> {
   const ctx = await getCtx(); if (!ctx) redirect("/login?next=/admin");

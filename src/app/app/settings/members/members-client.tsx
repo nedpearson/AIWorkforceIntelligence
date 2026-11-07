@@ -5,14 +5,17 @@ import { Copy, Trash2, UserPlus, Check } from "lucide-react";
 import { Badge, Button, Card, CardHeader, Empty, Input, Modal, Select, Table, Th, Td } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { changeMemberRole, inviteMember, removeMember, revokeInvitation } from "../actions";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 type Member = { id: string; userId: string; role: string; email: string; name: string; lastLoginAt: string | null; mfaEnabled: boolean; employeeId: string | null; employeeName: string | null; createdAt: string };
 type Invitation = { id: string; email: string; role: string; employeeName: string | null; expiresAt: string; acceptedAt: string | null; createdAt: string };
 const ROLES = ["owner", "admin", "manager", "employee", "consultant", "viewer"];
 const ROLE_HELP: Record<string, string> = { owner: "Everything, including billing and deleting data", admin: "Manage people, agents, settings; no billing", manager: "See workflows, opportunities, finance; approve agent actions; no pay data", employee: "Own data only", consultant: "BridgeBox consultant acting inside this org", viewer: "Read-only dashboards" };
-const date = (s: string | null) => (s ? new Date(s).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "never");
+const date = (s: string | null, tz: string) => (s ? formatDateTime(s, tz, { dateStyle: "medium", timeStyle: "short" }) : "never");
 
 export function MembersClient({ me, myRole, members, invitations, employees }: { me: string; myRole: string; members: Member[]; invitations: Invitation[]; employees: { id: string; name: string; title: string }[] }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [email, setEmail] = React.useState(""); const [role, setRole] = React.useState("manager"); const [employeeId, setEmployeeId] = React.useState("");
@@ -43,7 +46,7 @@ export function MembersClient({ me, myRole, members, invitations, employees }: {
               <Td><select value={m.role} disabled={busy === m.id || m.userId === me || (m.role === "owner" && !isOwner)} onChange={(e) => setRoleFor(m.id, e.target.value)} className="h-8 rounded-md border border-border bg-surface px-2 text-xs capitalize" data-testid={`members-role-${m.id}`} aria-label="Role">{ROLES.filter((r) => isOwner || r !== "owner").map((r) => <option key={r} value={r}>{r}</option>)}</select></Td>
               <Td className="text-xs">{m.employeeName ?? <span className="text-ink-3">—</span>}</Td>
               <Td>{m.mfaEnabled ? <Badge tone="verified">on</Badge> : <Badge tone="neutral">off</Badge>}</Td>
-              <Td className="text-xs whitespace-nowrap">{date(m.lastLoginAt)}</Td>
+              <Td className="text-xs whitespace-nowrap">{date(m.lastLoginAt, tz)}</Td>
               <Td>{m.userId !== me && <Button size="sm" variant="ghost" onClick={() => remove(m)} loading={busy === m.id} aria-label="Remove member" data-testid={`members-remove-${m.id}`}><Trash2 size={14} /></Button>}</Td>
             </tr>))}</tbody>
         </Table>
@@ -56,7 +59,7 @@ export function MembersClient({ me, myRole, members, invitations, employees }: {
             <tbody>{pending.map((i) => { const expired = new Date(i.expiresAt) < new Date(); return (
               <tr key={i.id} data-testid={`members-invite-row-${i.id}`}>
                 <Td className="text-xs font-medium">{i.email}</Td><Td className="text-xs capitalize">{i.role}</Td><Td className="text-xs">{i.employeeName ?? <span className="text-ink-3">—</span>}</Td>
-                <Td className="text-xs whitespace-nowrap">{expired ? <Badge tone="danger">expired</Badge> : date(i.expiresAt)}</Td>
+                <Td className="text-xs whitespace-nowrap">{expired ? <Badge tone="danger">expired</Badge> : date(i.expiresAt, tz)}</Td>
                 <Td><Button size="sm" variant="ghost" onClick={() => revoke(i.id)} loading={busy === i.id} aria-label="Revoke invitation" data-testid={`members-revoke-${i.id}`}><Trash2 size={14} /></Button></Td>
               </tr>); })}</tbody>
           </Table>
@@ -76,7 +79,7 @@ export function MembersClient({ me, myRole, members, invitations, employees }: {
       </Modal>
       <Modal open={!!link} onClose={() => setLink(null)} title="Invitation created">
         {link && <div className="space-y-3" data-testid="invite-link-modal">
-          <p className="text-sm">Email sending is not configured on this server, so share this link yourself. It works once and expires {date(link.expiresAt)}.</p>
+          <p className="text-sm">Email sending is not configured on this server, so share this link yourself. It works once and expires {date(link.expiresAt, tz)}.</p>
           <div className="flex gap-2"><input readOnly value={link.link} className="h-9 flex-1 rounded-lg border border-border bg-surface-2 px-3 font-mono text-xs" data-testid="invite-link" onFocus={(e) => e.currentTarget.select()} /><Button variant="secondary" onClick={copy} data-testid="invite-copy">{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy"}</Button></div>
           <p className="text-[11px] text-ink-3">The link is shown only now; the server stores a hash of it. Revoke it from the invitations list if it leaks.</p>
           <div className="flex justify-end"><Button onClick={() => setLink(null)} data-testid="invite-done">Done</Button></div>

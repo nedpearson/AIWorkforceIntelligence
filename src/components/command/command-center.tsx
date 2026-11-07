@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import { CONFIDENCE_RULE, PRIORITY_RULE, SECTION_KEYS, TYPE_LABEL, fmtValue, type CommandSectionKey } from "./format";
 import { DrillDrawer, OpportunityHeatmap, SavingsWaterfall, type Drill } from "./widgets";
 import { CustomizeDrawer, ExportMenu, HeroSegmented, SavedViews, type SavedView } from "./controls";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
 export type CommandProps = {
   model: ExecutiveModel;
@@ -34,6 +36,7 @@ const PRIORITY_TONE = { High: "gold", Medium: "indigo", Low: "neutral", None: "n
 const CONF_TONE = { High: "emerald", Medium: "gold", Low: "coral" } as const;
 
 export function CommandCenter({ model: m, deptFilter, period, layout, views, activeViewId, perms }: CommandProps) {
+  const tz = useTimeZone();
   const router = useRouter(); const pathname = usePathname(); const sp = useSearchParams();
   const [pending, start] = React.useTransition();
   const [drill, setDrill] = React.useState<Drill | null>(null);
@@ -225,7 +228,7 @@ export function CommandCenter({ model: m, deptFilter, period, layout, views, act
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-cyan-300"><Gauge size={14} />Executive command center{m.org.isDemo && <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] tracking-wide text-slate-200 ring-1 ring-white/20">Synthetic demo data</span>}</div>
             <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-[2.1rem] sm:leading-tight">Enterprise Transformation Command Center</h1>
-            <p className="mt-1 text-sm text-slate-300"><span className="font-semibold text-white">{m.org.name}</span> · computed <span suppressHydrationWarning>{new Date(m.computedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</span></p>
+            <p className="mt-1 text-sm text-slate-300"><span className="font-semibold text-white">{m.org.name}</span> · computed <span>{formatDateTime(m.computedAt, tz, { dateStyle: "medium", timeStyle: "short" })}</span></p>
             {f.opportunityCount > 0 && (
               <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-slate-200" data-testid="cmd-headline">
                 AI can return <b className="text-gold">{usd(f.realizableAnnualSavings)}/yr</b> in realizable value — <b className="text-cyan-300">{fmtValue(f.hoursRecoverablePerWeek, "hours")}/wk</b> of capacity across {f.opportunityCount} opportunities.{" "}

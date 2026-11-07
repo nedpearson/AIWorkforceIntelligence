@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { auth, type Ctx } from "./auth";
 import { db, schema } from "@/db/client";
 import { can, type Permission } from "./rbac";
+import { DEFAULT_TIME_ZONE } from "./datetime";
 
 export const ORG_COOKIE = "bb_org";
 
@@ -53,4 +54,10 @@ export async function listUserOrgs(userId: string) {
     : [];
   const managed = clients.filter((c) => c.parentOrgId && consultancyIds.includes(c.parentOrgId) && !own.some((o) => o.id === c.id)).map((c) => ({ ...c, role: "consultant" as const }));
   return [...own, ...managed];
+}
+
+/** The organization's IANA time zone (organizations.timezone) for server-side date formatting; see src/lib/datetime.ts. */
+export async function getOrgTimeZone(orgId: string): Promise<string> {
+  const [o] = await db.select({ timezone: schema.organizations.timezone }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  return o?.timezone ?? DEFAULT_TIME_ZONE;
 }

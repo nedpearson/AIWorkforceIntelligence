@@ -8,12 +8,14 @@ import { cn, fmtNum } from "@/lib/utils";
 import { pasteTextAction, getDocumentAction, decideAction } from "@/app/app/brain/actions";
 import type { DocumentDetail } from "@/engine/brain/review";
 import { CATEGORY_LABEL, fmtDate, type BrainData } from "./brain-center";
+import { useTimeZone } from "@/components/time-zone";
 
 const CATS = ["company", "policy", "procedure", "pricing", "product", "customer", "vendor", "terminology", "goal", "decision", "preference", "system", "general"];
 const ROLES = ["owner", "admin", "manager", "employee", "consultant", "viewer"];
 type UploadResult = { name: string; status: string; title?: string; error?: string; documentId?: string; duplicateOf?: { id: string; title: string; similarity: number }; warnings?: string[] };
 
 export function BrainLibrary({ data, deptName, initialDoc, pasteCategory, onPasteConsumed }: { data: BrainData; deptName: Map<string, string>; initialDoc: string | null; pasteCategory: string | null; onPasteConsumed: () => void }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [status, setStatus] = React.useState(""); const [cat, setCat] = React.useState(""); const [q, setQ] = React.useState("");
   const [openDoc, setOpenDoc] = React.useState<string | null>(initialDoc);
@@ -35,7 +37,7 @@ export function BrainLibrary({ data, deptName, initialDoc, pasteCategory, onPast
           <thead><tr><Th>Document</Th><Th>Status</Th><Th>Category</Th><Th className="hidden md:table-cell">Department</Th><Th className="hidden lg:table-cell">Who can read</Th><Th className="hidden md:table-cell">Freshness</Th></tr></thead>
           <tbody>{rows.map((d) => (
             <tr key={d.id} className="cursor-pointer hover:bg-surface-2/60" onClick={() => setOpenDoc(d.id)}>
-              <Td><button className="flex items-start gap-2 text-left" onClick={(e) => { e.stopPropagation(); setOpenDoc(d.id); }} data-testid={`brain-doc-${d.id}`}><FileText size={15} className="mt-0.5 shrink-0 text-purple-ink" /><span><span className="font-semibold">{d.title}</span><span className="block text-[11px] text-ink-3">v{d.version} · {fmtNum(d.wordCount)} words · added {fmtDate(d.createdAt)}</span></span></button></Td>
+              <Td><button className="flex items-start gap-2 text-left" onClick={(e) => { e.stopPropagation(); setOpenDoc(d.id); }} data-testid={`brain-doc-${d.id}`}><FileText size={15} className="mt-0.5 shrink-0 text-purple-ink" /><span><span className="font-semibold">{d.title}</span><span className="block text-[11px] text-ink-3">v{d.version} · {fmtNum(d.wordCount)} words · added {fmtDate(d.createdAt, tz)}</span></span></button></Td>
               <Td><StatusPill status={d.status} map={{ pending_review: "gold", approved: "emerald", archived: "midnight" }} /></Td>
               <Td className="text-xs">{CATEGORY_LABEL[d.category] ?? d.category}</Td>
               <Td className="hidden text-xs md:table-cell">{d.departmentId ? deptName.get(d.departmentId) ?? "—" : "Org-wide"}</Td>
@@ -129,6 +131,7 @@ function PasteModal({ data, init, onClose, onDone }: { data: BrainData; init: { 
 }
 
 function DocDrawer({ id, data, deptName, onClose, onNewVersion }: { id: string; data: BrainData; deptName: Map<string, string>; onClose: () => void; onNewVersion: (d: DocumentDetail) => void }) {
+  const tz = useTimeZone();
   const router = useRouter();
   const [d, setD] = React.useState<DocumentDetail | null | undefined>(undefined); const [busy, setBusy] = React.useState<string | null>(null); const [error, setError] = React.useState<string | null>(null);
   const [showChunks, setShowChunks] = React.useState(false);
@@ -143,7 +146,7 @@ function DocDrawer({ id, data, deptName, onClose, onNewVersion }: { id: string; 
             <StatusPill status={d.status} map={{ pending_review: "gold" }} /><Badge tone="purple">v{d.version}</Badge><Badge>{CATEGORY_LABEL[d.category] ?? d.category}</Badge>
             <span className="text-ink-2">{d.departmentId ? deptName.get(d.departmentId) : "Org-wide"} · {d.allowedRoles.length ? `Roles: ${d.allowedRoles.join(", ")}` : "All members"} · {fmtNum(d.wordCount)} words</span>
           </div>
-          <div className="text-xs text-ink-2">Added {fmtDate(d.createdAt)}{d.approvedAt ? ` · approved ${fmtDate(d.approvedAt)} · re-review every ${d.reviewEveryDays} days` : ""}</div>
+          <div className="text-xs text-ink-2">Added {fmtDate(d.createdAt, tz)}{d.approvedAt ? ` · approved ${fmtDate(d.approvedAt, tz)} · re-review every ${d.reviewEveryDays} days` : ""}</div>
           {d.similar.length > 0 && <div className="rounded-xl border border-gold/40 bg-gold-soft/40 p-3 text-xs" data-testid="brain-doc-similar"><div className="mb-1 flex items-center gap-1.5 font-bold text-gold-ink"><Layers size={13} />Possible duplicates</div><ul className="space-y-0.5">{d.similar.map((s) => <li key={s.id}>{s.title} — {Math.round(s.similarity * 100)}% similar ({s.status.replace("_", " ")})</li>)}</ul></div>}
           <div className="flex flex-wrap gap-2">
             {row?.canApprove && d.status === "pending_review" && <><Button size="sm" loading={busy === "approve"} onClick={() => decide("approve")} data-testid="brain-doc-approve"><CheckCircle2 size={14} />Approve</Button><Button size="sm" variant="secondary" loading={busy === "reject"} onClick={() => decide("reject")} data-testid="brain-doc-reject"><XCircle size={14} />Reject</Button></>}
@@ -157,7 +160,7 @@ function DocDrawer({ id, data, deptName, onClose, onNewVersion }: { id: string; 
             {showChunks && <ol className="space-y-1.5">{d.chunks.map((c) => <li key={c.ordinal} className="rounded-lg border border-border p-2 text-xs"><span className="font-semibold text-purple-ink">#{c.ordinal + 1}{c.heading ? ` · ${c.heading}` : ""}</span><p className="mt-0.5 line-clamp-3 text-ink-2">{c.text}</p></li>)}</ol>}
           </section>
           <section data-testid="brain-doc-versions"><h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-3"><History size={13} />Version history</h3>
-            <ol className="space-y-1">{d.versions.map((v) => <li key={v.id} className={cn("flex items-center justify-between rounded-lg px-2 py-1.5 text-xs", v.id === d.id ? "bg-purple-soft/50" : "")}><span>v{v.version} · {v.title}</span><span className="flex items-center gap-2 text-ink-2"><StatusPill status={v.status} map={{ pending_review: "gold" }} />{fmtDate(v.approvedAt ?? v.createdAt)}</span></li>)}</ol>
+            <ol className="space-y-1">{d.versions.map((v) => <li key={v.id} className={cn("flex items-center justify-between rounded-lg px-2 py-1.5 text-xs", v.id === d.id ? "bg-purple-soft/50" : "")}><span>v{v.version} · {v.title}</span><span className="flex items-center gap-2 text-ink-2"><StatusPill status={v.status} map={{ pending_review: "gold" }} />{fmtDate(v.approvedAt ?? v.createdAt, tz)}</span></li>)}</ol>
           </section>
         </div>
       )}

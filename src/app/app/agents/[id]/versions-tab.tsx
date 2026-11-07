@@ -12,12 +12,15 @@ import type { AgentDefinition, AgentNode } from "@/db/schema";
 import { diffDefinitions } from "@/engine/agents/versions-diff";
 import { rollbackAgentVersion } from "../actions";
 import type { VersionRow } from "./agent-detail";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDateTime } from "@/lib/datetime";
 
-const fmt = (iso: string) => new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+const fmt = (iso: string, tz: string) => formatDateTime(iso, tz, { dateStyle: "medium", timeStyle: "short" });
 const edgeKey = (e: AgentDefinition["edges"][number]) => `${e.from} → ${e.to}${e.when ? ` [${e.when}]` : ""}`;
 const nodeJson = (n: AgentNode | undefined) => (n ? JSON.stringify({ type: n.type, label: n.label, ...(n.sensitive != null ? { sensitive: n.sensitive } : {}), config: n.config, ...(n.compensate ? { compensate: n.compensate } : {}) }, null, 2) : "");
 
 export function VersionsTab({ agentId, versions, current, canWrite, onDone }: { agentId: string; versions: VersionRow[]; current: AgentDefinition; canWrite: boolean; onDone: () => void }) {
+  const tz = useTimeZone();
   const [right, setRight] = React.useState<number | null>(versions[0]?.version ?? null);
   const [left, setLeft] = React.useState<number | null>(versions[1]?.version ?? versions[0]?.version ?? null);
   const [busy, setBusy] = React.useState<number | null>(null); const [msg, setMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -47,7 +50,7 @@ export function VersionsTab({ agentId, versions, current, canWrite, onDone }: { 
             <li key={v.id} className={cn("card p-3", (v.version === left || v.version === right) && "ring-2 ring-indigo/40")} data-testid={`version-${v.version}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="font-display text-sm font-bold">v{v.version}{v.version === latest && <Badge tone="emerald" className="ml-2">current</Badge>}</span>
-                <span className="text-[11px] text-ink-3">{fmt(v.createdAt)}</span>
+                <span className="text-[11px] text-ink-3">{fmt(v.createdAt, tz)}</span>
               </div>
               <div className="mt-0.5 text-xs text-ink-2">{v.note ?? "—"}</div>
               <div className="text-[11px] text-ink-3">by {v.by} · {v.definition.nodes.length} nodes · {v.definition.edges.length} edges{v.approvalPolicy ? ` · approvals: ${v.approvalPolicy.mode.replace("_", " ")}` : ""}</div>

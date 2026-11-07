@@ -5,6 +5,8 @@
  */
 import * as React from "react";
 import { ACCENT_HEX } from "@/components/ui/enterprise";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 export type GanttMilestone = { id: string; name: string; status: string; startDate: string | null; dueDate: string | null; dependsOnMilestoneId: string | null };
 export type GanttProject = { id: string; name: string; status: string; startDate: string | null; targetDate: string | null; milestones: GanttMilestone[] };
@@ -14,6 +16,7 @@ const LABEL_W = 210; const ROW = 30; const HEAD = 34; const BAND = 30;
 const STATUS_FILL: Record<string, string> = { done: ACCENT_HEX.emerald, in_progress: ACCENT_HEX.cyan, blocked: ACCENT_HEX.coral, not_started: ACCENT_HEX.royal };
 
 export function Gantt({ projects, today, onSelect }: { projects: GanttProject[]; today: string; onSelect?: (projectId: string) => void }) {
+  const tz = useTimeZone();
   const now = new Date(today).getTime();
   type Row = { kind: "project"; p: GanttProject; y: number; s: number | null; e: number | null } | { kind: "ms"; p: GanttProject; m: GanttMilestone; y: number; s: number; e: number; overdue: boolean };
   const rows: Row[] = []; let y = HEAD; const unscheduled: string[] = [];
@@ -35,11 +38,12 @@ export function Gantt({ projects, today, onSelect }: { projects: GanttProject[];
   const W = LABEL_W + days * pxDay + 16; const H = y + 8;
   const x = (t: number) => LABEL_W + ((t - min) / DAY) * pxDay;
   const months: { t: number; label: string }[] = [];
-  for (let d = new Date(new Date(min).getFullYear(), new Date(min).getMonth() + 1, 1); d.getTime() < max; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) months.push({ t: d.getTime(), label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }) });
+  // Month ticks in UTC so the server render and the browser agree on positions and labels.
+  for (let d = new Date(Date.UTC(new Date(min).getUTCFullYear(), new Date(min).getUTCMonth() + 1, 1)); d.getTime() < max; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) months.push({ t: d.getTime(), label: formatDate(d, "UTC", { month: "short", year: "2-digit" }) });
   const msRow = new Map(rows.filter((r): r is Extract<Row, { kind: "ms" }> => r.kind === "ms").map((r) => [r.m.id, r]));
   const deps = [...msRow.values()].filter((r) => r.m.dependsOnMilestoneId && msRow.has(r.m.dependsOnMilestoneId)).map((r) => ({ from: msRow.get(r.m.dependsOnMilestoneId!)!, to: r }));
   const overdue = [...msRow.values()].filter((r) => r.overdue).length;
-  const label = `Gantt chart: ${projects.length} projects, ${msRow.size} scheduled milestones, ${deps.length} dependencies, ${overdue} overdue. Today is ${new Date(now).toLocaleDateString("en-US")}.`;
+  const label = `Gantt chart: ${projects.length} projects, ${msRow.size} scheduled milestones, ${deps.length} dependencies, ${overdue} overdue. Today is ${formatDate(now, tz)}.`;
   const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
   return (
@@ -66,7 +70,7 @@ export function Gantt({ projects, today, onSelect }: { projects: GanttProject[];
               <line x1={0} x2={W} y1={r.y + ROW} y2={r.y + ROW} stroke="var(--color-border)" strokeOpacity={0.5} />
               <text x={24} y={r.y + 19} fontSize={11} fill="var(--color-ink-2)">{trunc(r.m.name, 30)}</text>
               <rect x={x(r.s)} y={r.y + 8} width={Math.max(6, x(r.e) - x(r.s))} height={14} rx={4} fill={STATUS_FILL[r.m.status] ?? STATUS_FILL.not_started} stroke={r.overdue ? ACCENT_HEX.coral : "var(--color-surface)"} strokeWidth={r.overdue ? 2 : 1.5} strokeDasharray={r.overdue ? "3 2" : undefined}>
-                <title>{`${r.m.name} — ${r.m.status.replace(/_/g, " ")} · ${new Date(r.s).toLocaleDateString("en-US")} → ${new Date(r.e).toLocaleDateString("en-US")}${r.overdue ? " · OVERDUE" : ""}`}</title>
+                <title>{`${r.m.name} — ${r.m.status.replace(/_/g, " ")} · ${formatDate(r.s, tz)} → ${formatDate(r.e, tz)}${r.overdue ? " · OVERDUE" : ""}`}</title>
               </rect>
             </g>
           ))}

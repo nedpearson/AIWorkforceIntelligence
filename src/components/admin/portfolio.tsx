@@ -6,6 +6,8 @@ import { Button, Badge, Card, CardHeader, Empty, PageHeader, Tooltip } from "@/c
 import { LinkButton } from "@/components/admin/link-button";
 import { fmtUSD, fmtNum } from "@/lib/utils";
 import type { ClientSummary } from "@/app/admin/_data";
+import { useTimeZone } from "@/components/time-zone";
+import { formatDate } from "@/lib/datetime";
 
 const PROJECTED = "var(--color-projected)", VERIFIED = "var(--color-verified)";
 export function statusTone(s: string | null): "money" | "warn" | "danger" | "neutral" | "info" {
@@ -64,6 +66,7 @@ function Stat({ label, value, hint, tone }: { label: string; value: string; hint
 }
 
 function ClientCard({ r }: { r: ClientSummary }) {
+  const tz = useTimeZone();
   const seatWarn = r.seats > 0 && r.seatsUsed >= r.seats;
   return (
     <Link href={`/admin/clients/${r.id}`} className="card block p-5 transition hover:border-brand" data-testid={`client-card-${r.id}`}>
@@ -81,7 +84,7 @@ function ClientCard({ r }: { r: ClientSummary }) {
         <Row k="Seats" v={`${r.seatsUsed} / ${r.seats}`} warn={seatWarn} />
         <Row k="Employees" v={fmtNum(r.employees)} />
         <Row k="Collectors" v={`${r.collectorsActive} active${r.collectorsOffline ? `, ${r.collectorsOffline} offline` : ""}${r.collectorsPending ? `, ${r.collectorsPending} pending` : ""}`} warn={r.collectorsOffline > 0} />
-        <Row k="Last analysis" v={r.lastAnalysisAt ? new Date(r.lastAnalysisAt).toLocaleDateString() : "never"} />
+        <Row k="Last analysis" v={r.lastAnalysisAt ? formatDate(r.lastAnalysisAt, tz) : "never"} />
         <Row k="Projected / yr" v={fmtUSD(r.projected, { compact: true })} cls="text-projected" />
         <Row k="Verified / yr" v={fmtUSD(r.verified, { compact: true })} cls="text-verified" />
         <Row k="Agents deployed" v={`${r.agentsDeployed} / ${r.agentsTotal}`} />
