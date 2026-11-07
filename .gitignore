@@ -8,3 +8,5 @@ playwright-report
 /tmp
 tsconfig.tsbuildinfo
 deploy-prod.ps1
+.next-*
+test-results
