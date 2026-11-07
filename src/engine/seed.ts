@@ -48,12 +48,22 @@ export async function seedDemo(opts: { days?: number; log?: (m: string) => void;
   await db.insert(schema.subscriptions).values({ orgId: client.id, plan: "growth", status: "active", seats: 25, agentSlots: 10, currentPeriodEnd: new Date(Date.now() + 20 * 86400000) });
   await db.insert(schema.authorizations).values({ orgId: client.id, signedByUserId: clientAdmin.id, signerName: "Patricia Guidry", signerTitle: "Chief Executive Officer", scope: "All departments; business hours; metadata-only workflow observation for automation assessment", documentText: "Gulf Coast Supply Co. authorizes BridgeBox Consulting to deploy the BridgeBox Collector on company-owned devices for the purpose of workflow discovery. Collection is limited to application usage metadata. No keystroke contents, passwords, message bodies, or screenshots are collected. Employees receive written notice and may pause collection at any time." });
 
+  // Enterprise structure (synthetic): 2 business units, 3 locations
+  const [buDist] = await db.insert(schema.businessUnits).values({ orgId: client.id, name: "Distribution", kind: "division", country: "US" }).returning();
+  const [buCorp] = await db.insert(schema.businessUnits).values({ orgId: client.id, name: "Corporate Services", kind: "business_unit", country: "US" }).returning();
+  const [locHq] = await db.insert(schema.locations).values({ orgId: client.id, businessUnitId: buCorp.id, name: "Baton Rouge HQ", city: "Baton Rouge", region: "LA", country: "US", timezone: "America/Chicago" }).returning();
+  const [locHou] = await db.insert(schema.locations).values({ orgId: client.id, businessUnitId: buDist.id, name: "Houston Distribution Center", city: "Houston", region: "TX", country: "US", timezone: "America/Chicago" }).returning();
+  const [locLaf] = await db.insert(schema.locations).values({ orgId: client.id, businessUnitId: buDist.id, name: "Lafayette Branch", city: "Lafayette", region: "LA", country: "US", timezone: "America/Chicago" }).returning();
+  const deptPlacement: Record<string, { bu: string; loc: string; overhead: number }> = {
+    Finance: { bu: buCorp.id, loc: locHq.id, overhead: 84000 }, HR: { bu: buCorp.id, loc: locHq.id, overhead: 38000 }, Marketing: { bu: buCorp.id, loc: locHq.id, overhead: 61000 },
+    Operations: { bu: buDist.id, loc: locHou.id, overhead: 142000 }, "Customer Service": { bu: buDist.id, loc: locLaf.id, overhead: 57000 }, Sales: { bu: buDist.id, loc: locLaf.id, overhead: 73000 },
+  };
   const deptIds: Record<string, string> = {};
-  for (const name of DEMO_ORG.departments) { const [d] = await db.insert(schema.departments).values({ orgId: client.id, name }).returning(); deptIds[name] = d.id; }
+  for (const name of DEMO_ORG.departments) { const pl = deptPlacement[name]; const [d] = await db.insert(schema.departments).values({ orgId: client.id, name, businessUnitId: pl?.bu, locationId: pl?.loc, annualOverhead: pl ? String(pl.overhead) : null, overheadBasis: "assumed" }).returning(); deptIds[name] = d.id; }
   const empIds: Record<string, string> = {};
   for (const e of DEMO_ORG.employees) {
     const loaded = (e.baseAnnualCost * 1.3) / (40 * 48);
-    const [row] = await db.insert(schema.employees).values({ orgId: client.id, departmentId: deptIds[e.department], displayName: e.name, title: e.title, email: `${e.key}@gulfcoast.demo`, baseAnnualCost: String(e.baseAnnualCost), loadedHourlyCost: loaded.toFixed(2), costBasis: "observed", hoursPerWeek: "40", userId: e.key === "e3" ? viewer.id : null }).returning();
+    const [row] = await db.insert(schema.employees).values({ orgId: client.id, departmentId: deptIds[e.department], locationId: deptPlacement[e.department]?.loc, businessUnitId: deptPlacement[e.department]?.bu, displayName: e.name, title: e.title, email: `${e.key}@gulfcoast.demo`, baseAnnualCost: String(e.baseAnnualCost), loadedHourlyCost: loaded.toFixed(2), costBasis: "observed", hoursPerWeek: "40", userId: e.key === "e3" ? viewer.id : null }).returning();
     empIds[e.key] = row.id;
   }
   for (const e of DEMO_ORG.employees) {
