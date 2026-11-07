@@ -10,3 +10,7 @@ tsconfig.tsbuildinfo
 deploy-prod.ps1
 .next-*
 test-results
+
+.vercel
+deploy-env.ps1
+.env*.local
