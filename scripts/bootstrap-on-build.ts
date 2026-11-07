@@ -15,6 +15,10 @@ async function main() {
     const s = await seedDemo({ log: (m) => console.log("[bootstrap]", m.split("\n")[0]) });
     console.log("[bootstrap] seed:", s.skipped ? "already seeded" : `${s.events} events`);
   }
+  if (process.env.OWNER_EMAIL && process.env.OWNER_PASSWORD_HASH) {
+    const { ensurePlatformOwner } = await import("../src/engine/owner");
+    await ensurePlatformOwner({ email: process.env.OWNER_EMAIL, passwordHash: process.env.OWNER_PASSWORD_HASH, log: (m) => console.log("[bootstrap]", m) });
+  }
   console.log("[bootstrap] done", JSON.stringify({ applied: r.applied }));
   process.exit(0);
 }
