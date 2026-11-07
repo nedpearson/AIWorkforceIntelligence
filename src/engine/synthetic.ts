@@ -164,7 +164,8 @@ export function generateEvents(opts: GenOptions = {}): SynthEvent[] {
       // build the day's run list
       const runs: string[] = [];
       for (const pa of emp.patterns) {
-        const n = Math.max(0, Math.round(pa.runsPerDay + (rnd() * 2 - 1) * pa.variance));
+        const expected = pa.runsPerDay + (rnd() * 2 - 1) * pa.variance;
+        const n = expected < 1 ? (rnd() < Math.max(0, expected) ? 1 : 0) : Math.max(0, Math.round(expected));
         for (let i = 0; i < n; i++) runs.push(pa.pattern);
       }
       // shuffle
@@ -175,7 +176,7 @@ export function generateEvents(opts: GenOptions = {}): SynthEvent[] {
         // occasional ad-hoc noise between runs
         if (rnd() < 0.35) { const noise = pickNoise(rnd); out.push({ employeeKey: emp.key, ts: new Date(cursor), ...noise }); cursor = new Date(cursor.getTime() + noise.durationMs); }
         // lunch idle
-        if (cursor.getHours() === 12 && rnd() < 0.8) { const idle = 30 * 60000 + rnd() * 20 * 60000; out.push({ employeeKey: emp.key, ts: new Date(cursor), type: "idle_start", app: "", appCategory: "idle", titleCategory: "", titleHash: "", durationMs: idle, meta: {} }); cursor = new Date(cursor.getTime() + idle); out.push({ employeeKey: emp.key, ts: new Date(cursor), type: "idle_end", app: "", appCategory: "idle", titleCategory: "", titleHash: "", durationMs: 0, meta: {} }); }
+        if (cursor.getHours() === 12 && rnd() < 0.8) { const idle = Math.round(30 * 60000 + rnd() * 20 * 60000); out.push({ employeeKey: emp.key, ts: new Date(cursor), type: "idle_start", app: "", appCategory: "idle", titleCategory: "", titleHash: "", durationMs: idle, meta: {} }); cursor = new Date(cursor.getTime() + idle); out.push({ employeeKey: emp.key, ts: new Date(cursor), type: "idle_end", app: "", appCategory: "idle", titleCategory: "", titleHash: "", durationMs: 0, meta: {} }); }
         const rework = rnd() < p.rework;
         const steps = rework ? [...p.steps, ...p.steps.slice(2, 4)] : p.steps; // rework repeats middle steps
         for (const [app, cat, title, type, baseMs, meta] of steps) {

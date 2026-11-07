@@ -19,7 +19,7 @@ export const DEFAULTS = {
   rampMonths: 3,
 } as const;
 
-export function loadedHourlyCost(baseAnnualCost: number, benefitsLoadPct = DEFAULTS.benefitsLoadPct, hoursPerWeek = DEFAULTS.workHoursPerWeek, weeksPerYear = DEFAULTS.workWeeksPerYear): { value: number; tree: CalcTree } {
+export function loadedHourlyCost(baseAnnualCost: number, benefitsLoadPct: number = DEFAULTS.benefitsLoadPct, hoursPerWeek: number = DEFAULTS.workHoursPerWeek, weeksPerYear: number = DEFAULTS.workWeeksPerYear): { value: number; tree: CalcTree } {
   const annualHours = hoursPerWeek * weeksPerYear;
   const value = (baseAnnualCost * (1 + benefitsLoadPct)) / annualHours;
   return { value, tree: { label: "Loaded hourly cost", value, unit: "usd", basis: "estimated", formula: `base ${baseAnnualCost} × (1 + ${benefitsLoadPct}) ÷ (${hoursPerWeek} h/wk × ${weeksPerYear} wk)`, children: [
@@ -47,6 +47,10 @@ export type OpportunityInput = {
   complexity: number; // 0..1 (apps involved, judgment, handoffs) — raises implementation hours
   adoptionRate?: number; realizationRate?: number; weeksPerYear?: number; consultingHourly?: number;
   basisHours?: Basis;
+  /** Monthly run cost for `ai_agent` opportunities (platform per-agent fee). Defaults to the profile's monthlyRun. */
+  perAgentMonthly?: number;
+  /** Multiplier on implementation + operating cost (scenario costMult). Default 1. */
+  costMult?: number;
 };
 export type OpportunityEconomics = {
   hoursRecoverablePerWeek: number; grossAnnualSavings: number; realizableAnnualSavings: number;
@@ -62,9 +66,11 @@ export function opportunityEconomics(i: OpportunityInput): OpportunityEconomics 
   const hoursRecoverablePerWeek = i.hoursPerWeek * i.automationPct * adoption;
   const grossAnnualSavings = hoursRecoverablePerWeek * weeks * i.avgLoadedHourly;
   const realizableAnnualSavings = grossAnnualSavings * realization;
+  const costMult = i.costMult ?? 1;
+  const monthlyRun = i.type === "ai_agent" && i.perAgentMonthly != null ? i.perAgentMonthly : prof.monthlyRun;
   const consultingHours = prof.consultingHours * (1 + i.complexity) ;
-  const implementationCost = consultingHours * hourly + prof.toolingOneTime;
-  const annualOperatingCost = prof.monthlyRun * 12;
+  const implementationCost = (consultingHours * hourly + prof.toolingOneTime) * costMult;
+  const annualOperatingCost = monthlyRun * 12 * costMult;
   const netAnnualSavings = realizableAnnualSavings - annualOperatingCost;
   const paybackMonths = netAnnualSavings > 0 ? (implementationCost / (netAnnualSavings / 12)) : null;
   const roi1y = implementationCost > 0 ? (netAnnualSavings - implementationCost) / implementationCost : 0;
@@ -81,11 +87,12 @@ export function opportunityEconomics(i: OpportunityInput): OpportunityEconomics 
       { label: "Average loaded hourly cost", value: i.avgLoadedHourly, unit: "usd", basis: "estimated", source: `Weighted across ${i.employeeCount} employee(s)` },
     ] },
     { label: "Realization rate", value: realization, unit: "pct", basis: "assumed", source: "Share of freed time that becomes avoided hiring, reassigned revenue work or attrition backfill. Time saved ≠ payroll cut." },
-    { label: "Implementation cost (one-time)", value: implementationCost, unit: "usd", basis: "estimated", formula: `${consultingHours.toFixed(0)} consulting hrs × $${hourly} + $${prof.toolingOneTime} tooling`, children: [
+    { label: "Implementation cost (one-time)", value: implementationCost, unit: "usd", basis: "estimated", formula: `(${consultingHours.toFixed(0)} consulting hrs × $${hourly} + $${prof.toolingOneTime} tooling)${costMult !== 1 ? ` × ${costMult}` : ""}`, children: [
       { label: "Base effort for " + prof.label, value: prof.consultingHours, unit: "hours", basis: "assumed" },
       { label: "Complexity multiplier", value: 1 + i.complexity, unit: "x", basis: "estimated", source: "Apps involved, handoffs, judgment flags" },
+      ...(costMult !== 1 ? [{ label: "Scenario cost multiplier", value: costMult, unit: "x", basis: "assumed" as const, source: "Financial scenario" }] : []),
     ] },
-    { label: "Annual operating cost", value: annualOperatingCost, unit: "usd", basis: "assumed", formula: `$${prof.monthlyRun}/mo × 12` },
+    { label: "Annual operating cost", value: annualOperatingCost, unit: "usd", basis: "assumed", formula: `$${monthlyRun}/mo × 12${costMult !== 1 ? ` × ${costMult}` : ""}` },
     { label: "Net annual savings", value: netAnnualSavings, unit: "usd", basis: "estimated", formula: "realizable − operating" },
     { label: "Payback period", value: paybackMonths ?? 0, unit: "months", basis: "estimated", formula: "implementation ÷ (net annual ÷ 12)" },
   ] };
