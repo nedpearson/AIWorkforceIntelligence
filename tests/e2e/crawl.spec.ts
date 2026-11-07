@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect, statePath, type Role } from "./fixtures";
 import { BENIGN_CONSOLE, navFor, type NavEntry } from "./nav-map";
+import { orgIdBySlug, aiEmployeeByPersona, closeDb, GULF_SLUG } from "./db";
 import type { BrowserContext, Page } from "@playwright/test";
 
 /**
@@ -24,8 +25,10 @@ import type { BrowserContext, Page } from "@playwright/test";
  * Every server action POST fired during the crawl is recorded in the report (`serverActions`) for transparency.
  */
 const MAX_CLICKS = 60;
-const DESTRUCTIVE = /delete|remove|revoke|disconnect|sign out|reject|withdraw|rollback|purge/i;
-const STATEFUL = /\b(pause|resume|deploy|approve|archive|complete|start|stop|run analysis|run now|re-?run|regenerate|rotate|publish|accept|invite|checkout|subscribe|upgrade|downgrade|choose|switch to|billing portal|manage billing|cancel plan|save|submit|create|generate|record|import|seed|enroll|connect|reset to|apply|confirm|send|mark|promote|restore|schedule|test connection|request)\b/i;
+const DESTRUCTIVE = /delete|remove|revoke|disconnect|sign out|reject|withdraw|rollback|purge|retire/i;
+const STATEFUL = /\b(pause|resume|deploy|approve|archive|complete|start|stop|run analysis|run now|re-?run|regenerate|rotate|publish|accept|invite|checkout|subscribe|upgrade|downgrade|choose|switch to|billing portal|manage billing|cancel plan|save|submit|create|generate|record|import|seed|enroll|connect|reset to|apply|confirm|send|mark|promote|restore|schedule|test connection|request|meet|add all|add the remaining|provision|hire|learn from|load demo|sync now|upload|new version|raise|move to|run demonstration|run on live|run task|pilot)\b/i;
+/** AI Workforce controls that change an AI employee's lifecycle, permission, configuration or portrait (covered by the acceptance spec). */
+const STATEFUL_TESTID = /^(perm-|st-|cz-|portrait-|stage-pilot|stage-next-1|rec-pilot-|xp-meet-|rec-meet-|wf-provision|chat-suggest-|assign-runner-run|demo-run|skills-lab-)/;
 
 const VARIANTS = [
   { key: "desktop-light", viewport: { width: 1440, height: 900 }, colorScheme: "light" as const, isMobile: false, interact: true },
@@ -92,7 +95,7 @@ function skipReason(c: Cand, origin: string): string | null {
   }
   if ((c.tag === "select" || (c.tag === "input" && !c.inForm) || c.role === "switch") && !c.viewCtl) return "stateful-control";
   if (c.type === "submit" || (c.tag === "button" && c.inForm && c.type !== "button")) return "form-submit";
-  if (STATEFUL.test(c.label)) return "stateful";
+  if (STATEFUL.test(c.label) || STATEFUL_TESTID.test(c.tid)) return "stateful";
   return null;
 }
 
@@ -154,15 +157,17 @@ async function crawlInteractions(page: Page, base: string, rep: PageReport, page
   }
 }
 
+function writeReport() {
+  fs.mkdirSync(REPORT_DIR, { recursive: true });
+  const prev = fs.existsSync(REPORT_FILE) ? (JSON.parse(fs.readFileSync(REPORT_FILE, "utf8")) as { pages: PageReport[] }).pages : [];
+  const merged = [...prev.filter((p) => !results.some((r) => r.role === p.role && r.variant === p.variant && r.path === p.path)), ...results];
+  const totals = { pages: merged.length, clicked: merged.reduce((a, r) => a + r.clicked, 0), skipped: merged.reduce((a, r) => a + r.skipped, 0), navigations: merged.reduce((a, r) => a + r.navigations, 0), consoleErrors: merged.reduce((a, r) => a + r.consoleErrors.length, 0), pageErrors: merged.reduce((a, r) => a + r.pageErrors.length, 0) };
+  fs.writeFileSync(REPORT_FILE, JSON.stringify({ generatedAt: new Date().toISOString(), maxClicksPerPage: MAX_CLICKS, totals, pages: merged }, null, 2));
+}
+
 test.describe("Crawl", () => {
   test.describe.configure({ mode: "serial" });
-  test.afterAll(() => {
-    fs.mkdirSync(REPORT_DIR, { recursive: true });
-    const prev = fs.existsSync(REPORT_FILE) ? (JSON.parse(fs.readFileSync(REPORT_FILE, "utf8")) as { pages: PageReport[] }).pages : [];
-    const merged = [...prev.filter((p) => !results.some((r) => r.role === p.role && r.variant === p.variant && r.path === p.path)), ...results];
-    const totals = { pages: merged.length, clicked: merged.reduce((a, r) => a + r.clicked, 0), skipped: merged.reduce((a, r) => a + r.skipped, 0), navigations: merged.reduce((a, r) => a + r.navigations, 0), consoleErrors: merged.reduce((a, r) => a + r.consoleErrors.length, 0), pageErrors: merged.reduce((a, r) => a + r.pageErrors.length, 0) };
-    fs.writeFileSync(REPORT_FILE, JSON.stringify({ generatedAt: new Date().toISOString(), maxClicksPerPage: MAX_CLICKS, totals, pages: merged }, null, 2));
-  });
+  test.afterAll(writeReport);
 
   for (const role of ROLES) {
     for (const v of VARIANTS) {
@@ -175,6 +180,8 @@ test.describe("Crawl", () => {
           // the sidebar this role sees must be exactly the documented list (drift fails here, not silently)
           if (!v.isMobile) {
             await page.goto("/app");
+            // the stored Advanced/Simple choice is applied after hydration (localStorage) — wait for it before reading the list
+            await expect(page.getByTestId("sidebar").getByTestId("nav-mode-advanced")).toHaveAttribute("aria-checked", "true");
             const seen = await page.getByTestId("sidebar").locator("nav a[data-testid^='nav-']").evaluateAll((as) => as.map((a) => a.getAttribute("data-testid")));
             expect(seen.sort()).toEqual(navFor(role).map((n) => n.testid).sort());
           }
@@ -199,5 +206,88 @@ test.describe("Crawl", () => {
         } finally { await ctx.close(); }
       });
     }
+  }
+});
+
+/**
+ * AI Workforce modules beyond the sidebar entries: every AI Brain tab, an AI employee profile (every tab), the builder,
+ * the Skills Lab, the universal assistant panel and a guided-tour step — at 1440 light, 1440 dark and 390 light, for the
+ * client owner (manager: read-only render of the Brain and the profile). Same bar as the nav crawl. On desktop-light the
+ * Brain overview and the profile's Talk tab are also click-crawled (lifecycle/permission/portrait controls skipped).
+ */
+test.describe("Crawl · AI Workforce modules", () => {
+  test.describe.configure({ mode: "serial" });
+  test.afterAll(writeReport);
+  let profilePath = "";
+  test.beforeAll(async () => {
+    const e = await aiEmployeeByPersona(await orgIdBySlug(GULF_SLUG), "charlotte");
+    await closeDb();
+    if (!e) throw new Error("Charlotte (seeded AI employee) not found");
+    profilePath = `/app/workforce/${e.id}`;
+  });
+  const BRAIN_TABS = ["overview", "library", "facts", "review", "ask", "sources"];
+  const PROFILE_TABS = ["talk", "skills", "demo", "assign", "work", "connect", "savings", "customize", "memory"];
+  const pagesFor = (role: Role): { path: string; h1: string; interact?: boolean }[] => [
+    ...BRAIN_TABS.filter((t) => role === "owner" || t !== "review").map((t) => ({ path: `/app/brain?tab=${t}`, h1: "AI Brain", interact: t === "overview" })),
+    ...PROFILE_TABS.map((t) => ({ path: `${profilePath}?tab=${t}`, h1: "Meet Charlotte", interact: t === "talk" })),
+    ...(role === "owner" ? [{ path: "/app/workforce/new", h1: "Build an AI employee" }, { path: "/app/skills-lab", h1: "Skills Lab" }] : []),
+  ];
+  const CASES: { role: Role; v: (typeof VARIANTS)[number] }[] = [...VARIANTS.map((v) => ({ role: "owner" as Role, v })), { role: "manager", v: VARIANTS[0] }];
+  for (const { role, v } of CASES) {
+    test(`${role} · ${v.key}: Brain tabs, profile tabs, builder, Skills Lab, assistant panel and a tour step render cleanly`, async ({ browser }) => {
+      test.setTimeout(30 * 60_000);
+      const ctx = await browser.newContext({ storageState: statePath(role), viewport: v.viewport, colorScheme: v.colorScheme, isMobile: v.isMobile, hasTouch: v.isMobile, acceptDownloads: false, reducedMotion: "reduce" });
+      try {
+        const page = await ctx.newPage();
+        const { consoleErrors, pageErrors, serverActions } = attachWatchers(page);
+        for (const pg of pagesFor(role)) {
+          const t0 = Date.now(); const c0 = consoleErrors.length; const p0 = pageErrors.length; const a0 = serverActions.n;
+          const res = await page.goto(pg.path, { waitUntil: "domcontentloaded" });
+          const rep: PageReport = { role, variant: v.key, path: pg.path, status: res?.status() ?? 0, h1: "", candidates: 0, clicked: 0, skipped: 0, navigations: 0, dialogs: 0, serverActions: 0, consoleErrors: [], pageErrors: [], ms: 0 };
+          results.push(rep);
+          expect.soft(rep.status, `${role} ${v.key} ${pg.path}: HTTP status`).toBe(200);
+          await page.waitForLoadState("load").catch(() => {});
+          await page.waitForTimeout(400);
+          rep.h1 = (await page.locator("h1").first().innerText().catch(() => "")).trim();
+          await assertPageHealthy(page, { testid: "", group: "", roles: [role], path: pg.path, h1: pg.h1 }, `${role} ${v.key} ${pg.path}`);
+          if (v.interact && pg.interact && role === "owner") await crawlInteractions(page, pg.path, rep, pageErrors);
+          rep.consoleErrors = consoleErrors.slice(c0); rep.pageErrors = pageErrors.slice(p0); rep.ms = Date.now() - t0; rep.serverActions = serverActions.n - a0;
+          console.log(`[crawl] ${role} ${v.key} ${pg.path} status=${rep.status} clicked=${rep.clicked} skipped=${rep.skipped} console=${rep.consoleErrors.length} pageerr=${rep.pageErrors.length} ${rep.ms}ms`);
+          expect.soft(rep.pageErrors, `${role} ${v.key} ${pg.path}: page errors`).toEqual([]);
+          expect.soft(rep.consoleErrors, `${role} ${v.key} ${pg.path}: console errors`).toEqual([]);
+        }
+        // universal assistant panel, opened from the launcher, asked a question
+        const c0 = consoleErrors.length; const p0 = pageErrors.length;
+        await page.goto("/app/workforce", { waitUntil: "load" });
+        await page.getByTestId("assistant-launcher").click();
+        const panel = page.getByTestId("assistant-panel");
+        await expect(panel).toBeVisible();
+        const answers = panel.getByTestId("assistant-answer");
+        await expect(panel.getByTestId("assistant-messages")).toBeVisible();
+        await page.waitForTimeout(500); // conversation history loads on open
+        const n0 = await answers.count();
+        await panel.getByTestId("assistant-input").fill("Who on my AI team can process invoices?");
+        await panel.getByTestId("assistant-send").click();
+        await expect(answers).toHaveCount(n0 + 1);
+        await expect(answers.last().locator("[aria-label='Thinking']")).toHaveCount(0, { timeout: 45_000 });
+        await expect(answers.last()).not.toContainText("couldn't answer");
+        await expect(panel.getByTestId("assistant-citation").first()).toBeVisible({ timeout: 45_000 });
+        await assertPageHealthy(page, { testid: "", group: "", roles: [role], path: "/app/workforce", h1: "Your AI Workforce" }, `${role} ${v.key} assistant panel`);
+        await page.getByTestId("assistant-close").click();
+        await expect(panel).toHaveCount(0);
+        // a guided-tour step (deep link ?tour=), then Next and close
+        await page.goto("/app/brain?tour=brain", { waitUntil: "load" });
+        const pop = page.getByTestId("tour-popover");
+        await expect(pop).toBeVisible({ timeout: 20_000 });
+        await expect(pop).toContainText(/Step 1|1 of|AI Brain/i);
+        await assertPageHealthy(page, { testid: "", group: "", roles: [role], path: "/app/brain", h1: "AI Brain" }, `${role} ${v.key} tour step`);
+        await pop.getByTestId("tour-next").click();
+        await expect(pop).toBeVisible();
+        await pop.getByTestId("tour-close").click();
+        await expect(page.getByTestId("tour-overlay")).toHaveCount(0);
+        expect.soft(pageErrors.slice(p0), `${role} ${v.key} assistant/tour: page errors`).toEqual([]);
+        expect.soft(consoleErrors.slice(c0), `${role} ${v.key} assistant/tour: console errors`).toEqual([]);
+      } finally { await ctx.close(); }
+    });
   }
 });

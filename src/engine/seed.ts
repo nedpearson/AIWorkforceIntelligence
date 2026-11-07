@@ -4,7 +4,7 @@
  * then runs the analysis engine so workflows/opportunities exist. Everything is labelled is_demo=true.
  */
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { DEMO_ORG, generateEvents } from "@/engine/synthetic";
 import { sha256, randomToken } from "@/lib/crypto";
@@ -25,6 +25,7 @@ export async function seedDemo(opts: { days?: number; log?: (m: string) => void;
       const [wf] = await db.select({ id: schema.workflows.id }).from(schema.workflows).where(eq(schema.workflows.orgId, demo.id)).limit(1);
       if (!wf) { const [camp] = await db.select({ id: schema.observationCampaigns.id }).from(schema.observationCampaigns).where(eq(schema.observationCampaigns.orgId, demo.id)).limit(1); const run = await runAnalysis({ orgId: demo.id, campaignId: camp?.id }); log("analysis (repair): " + JSON.stringify(run)); return { skipped: true, analysis: run }; }
     }
+    if (demo) await upgradeDemo(demo.id, log);
     log("already seeded"); return { skipped: true };
   }
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
@@ -101,6 +102,43 @@ export async function seedDemo(opts: { days?: number; log?: (m: string) => void;
   let run: unknown = null;
   if (opts.runAnalysisNow !== false) { run = await runAnalysis({ orgId: client.id, campaignId: campaign.id }); log("analysis: " + JSON.stringify(run)); }
   else { const { enqueue } = await import("@/engine/jobs"); await enqueue("analysis", { orgId: client.id, campaignId: campaign.id }, client.id); log("analysis job enqueued"); }
+  await upgradeDemo(client.id, log);
   log(`\nSeeded.\n  Consultancy owner: owner@bridgebox.demo / ${PASSWORD}\n  Client owner:      admin@gulfcoast.demo / ${PASSWORD}\n  Client manager:    manager@gulfcoast.demo / ${PASSWORD}\n  Isolation org:     admin@bayoudental.demo / ${PASSWORD}`);
   return { skipped: false, events: events.length, analysis: run };
+}
+
+/**
+ * Idempotent upgrades for demo orgs created by earlier seed versions (e.g. production seeded before Phase A/B):
+ * enterprise structure, synthetic Brain knowledge, recommended AI team (draft, read-only). Never touches non-demo orgs.
+ */
+export async function upgradeDemo(orgId: string, log: (m: string) => void = console.log) {
+  const [org] = await db.select().from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
+  if (!org?.isDemo) return;
+  const [owner] = await db.select({ userId: schema.memberships.userId }).from(schema.memberships).where(and(eq(schema.memberships.orgId, orgId), eq(schema.memberships.role, "owner"))).limit(1);
+  const ownerId = owner?.userId ?? null;
+  const [anyBu] = await db.select({ id: schema.businessUnits.id }).from(schema.businessUnits).where(eq(schema.businessUnits.orgId, orgId)).limit(1);
+  if (!anyBu) {
+    const [buDist] = await db.insert(schema.businessUnits).values({ orgId, name: "Distribution", kind: "division", country: "US" }).returning();
+    const [buCorp] = await db.insert(schema.businessUnits).values({ orgId, name: "Corporate Services", kind: "business_unit", country: "US" }).returning();
+    const [hq] = await db.insert(schema.locations).values({ orgId, businessUnitId: buCorp.id, name: "Baton Rouge HQ", city: "Baton Rouge", region: "LA", country: "US" }).returning();
+    const [hou] = await db.insert(schema.locations).values({ orgId, businessUnitId: buDist.id, name: "Houston Distribution Center", city: "Houston", region: "TX", country: "US" }).returning();
+    const [laf] = await db.insert(schema.locations).values({ orgId, businessUnitId: buDist.id, name: "Lafayette Branch", city: "Lafayette", region: "LA", country: "US" }).returning();
+    const place: Record<string, [string, string, number]> = { Finance: [buCorp.id, hq.id, 84000], HR: [buCorp.id, hq.id, 38000], Marketing: [buCorp.id, hq.id, 61000], Operations: [buDist.id, hou.id, 142000], "Customer Service": [buDist.id, laf.id, 57000], Sales: [buDist.id, laf.id, 73000] };
+    const depts = await db.select().from(schema.departments).where(eq(schema.departments.orgId, orgId));
+    for (const d of depts) { const pl = place[d.name]; if (!pl) continue; await db.update(schema.departments).set({ businessUnitId: pl[0], locationId: pl[1], annualOverhead: String(pl[2]), overheadBasis: "assumed" }).where(eq(schema.departments.id, d.id)); await db.update(schema.employees).set({ businessUnitId: pl[0], locationId: pl[1] }).where(eq(schema.employees.departmentId, d.id)); }
+    log("upgrade: enterprise structure added");
+  }
+  if (ownerId) {
+    const [doc] = await db.select({ id: schema.knowledgeDocuments.id }).from(schema.knowledgeDocuments).where(eq(schema.knowledgeDocuments.orgId, orgId)).limit(1);
+    if (!doc) { const { loadDemoKnowledge } = await import("@/engine/brain/demo-content"); const r = await loadDemoKnowledge(orgId, ownerId); log(`upgrade: demo knowledge ${r.created} documents`); }
+    const [emp] = await db.select({ id: schema.aiEmployees.id }).from(schema.aiEmployees).where(eq(schema.aiEmployees.orgId, orgId)).limit(1);
+    if (!emp) {
+      const { recommendations } = await import("@/engine/workforce/recommendations");
+      const { provisionTeam } = await import("@/engine/workforce/core");
+      const recs = await recommendations(orgId);
+      const keys = [...new Set(recs.map((r) => r.persona.key))];
+      const r = await provisionTeam(orgId, ownerId, keys.length ? keys : undefined);
+      log(`upgrade: AI team provisioned (${r.created.length})`);
+    }
+  }
 }

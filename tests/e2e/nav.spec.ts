@@ -1,5 +1,5 @@
-import { test, expect, watchConsole, GULF_COAST_NAME } from "./fixtures";
-import { APP_NAV, BENIGN_CONSOLE, navFor } from "./nav-map";
+import { test, expect, watchConsole, loginViaForm, ACCOUNTS, GULF_COAST_NAME } from "./fixtures";
+import { APP_NAV, BENIGN_CONSOLE, SIMPLE_NAV, navFor } from "./nav-map";
 
 const byTestid = (t: string) => APP_NAV.find((n) => n.testid === t)!;
 
@@ -24,7 +24,7 @@ test.describe("Navigation", () => {
     const sidebar = page.getByTestId("sidebar");
     const visible = await sidebar.locator("nav a[data-testid^='nav-']").evaluateAll((as) => as.map((a) => a.getAttribute("data-testid")));
     const mine = navFor("owner");
-    expect(visible.sort()).toEqual(mine.map((n) => n.testid).sort()); // the owner sees exactly the documented 26 items
+    expect(visible.sort()).toEqual(mine.map((n) => n.testid).sort()); // the owner sees exactly the documented items (30 incl. the AI Workforce group)
     for (const item of mine) {
       await sidebar.getByTestId(item.testid).click();
       await page.waitForURL((u) => u.pathname === item.path);
@@ -36,6 +36,36 @@ test.describe("Navigation", () => {
     }
     await expect(page.locator("header")).toContainText(GULF_COAST_NAME);
     await expect(page.getByTestId("demo-banner")).toBeVisible();
+  });
+
+  test("manager: Simple sidebar by default (five entry points + AI Brain + assistant), Advanced shows every permitted module and persists", async ({ browser }) => {
+    const ctx = await browser.newContext(); // fresh login: no stored nav-mode preference
+    try {
+      const page = await ctx.newPage();
+      const errors = watchConsole(page, { ignore: IGNORED_CONSOLE });
+      await loginViaForm(page, ACCOUNTS.manager.email);
+      const sidebar = page.getByTestId("sidebar");
+      await expect(sidebar.getByTestId("nav-mode-simple")).toHaveAttribute("aria-checked", "true");
+      const links = await sidebar.locator("nav a[data-testid]").evaluateAll((as) => as.map((a) => a.getAttribute("data-testid")));
+      expect(links).toEqual(SIMPLE_NAV.map((n) => n.testid));
+      await expect(sidebar.getByTestId("snav-assistant")).toBeVisible();
+      for (const item of SIMPLE_NAV) {
+        await sidebar.getByTestId(item.testid).click();
+        await page.waitForURL((u) => u.pathname === item.path);
+        await expect(page.getByRole("heading", { level: 1, name: item.h1, exact: true })).toBeVisible();
+        await expect(page.locator("body")).not.toContainText("Application error");
+      }
+      await sidebar.getByTestId("snav-assistant").click();
+      await expect(page.getByTestId("assistant-panel")).toBeVisible();
+      await page.getByTestId("assistant-close").click();
+      await sidebar.getByTestId("nav-mode-advanced").click();
+      const adv = await sidebar.locator("nav a[data-testid^='nav-']").evaluateAll((as) => as.map((a) => a.getAttribute("data-testid")));
+      expect(adv.sort()).toEqual(navFor("manager").map((n) => n.testid).sort());
+      await page.reload();
+      await expect(sidebar.getByTestId("nav-mode-advanced")).toHaveAttribute("aria-checked", "true");
+      await expect(sidebar.getByTestId("nav-workforce")).toBeVisible();
+      expect(errors).toEqual([]);
+    } finally { await ctx.close(); }
   });
 
   test("consultancy owner: every consulting-portal item loads with the right URL and heading and no console errors", async ({ consultantPage: page }) => {

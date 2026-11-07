@@ -46,3 +46,38 @@ export async function seededIdsFor(orgId: string): Promise<SeededIds> {
   if (!wf || !op || !em) throw new Error(`org ${orgId} is missing seeded workflows/opportunities/employees`);
   return { orgId, workflowId: wf.id, opportunityId: op.id, employeeId: em.id, agentId: ag?.id ?? null, reportId: rp?.id ?? null };
 }
+
+/** AI employee row (read-only) by persona key, for read-back assertions in the AI Workforce specs. */
+export async function aiEmployeeByPersona(orgId: string, personaKey: string): Promise<{ id: string; status: string; permissionLevel: string; agentId: string | null; portraitUrl: string | null } | null> {
+  const [r] = await conn()<{ id: string; status: string; permission_level: string; agent_id: string | null; portrait_url: string | null }[]>`select id, status, permission_level, agent_id, portrait_url from ai_employees where org_id = ${orgId} and persona_key = ${personaKey} limit 1`;
+  return r ? { id: r.id, status: r.status, permissionLevel: r.permission_level, agentId: r.agent_id, portraitUrl: r.portrait_url } : null;
+}
+export async function skillRunCount(aiEmployeeId: string, mode: "sandbox" | "live", status = "succeeded"): Promise<number> {
+  const [r] = await conn()<{ n: number }[]>`select count(*)::int as n from skill_runs where ai_employee_id = ${aiEmployeeId} and mode = ${mode} and status = ${status}`;
+  return r.n;
+}
+/** agent_runs rows the skills engine mirrored from the given skill run (trigger "skill"). Sandbox runs must have none. */
+export async function agentRunsForSkillRun(skillRunId: string): Promise<{ id: string; agentId: string; minutesSaved: number }[]> {
+  const rows = await conn()<{ id: string; agent_id: string; minutes_saved: string }[]>`select id, agent_id, minutes_saved from agent_runs where trigger = 'skill' and input->>'skillRunId' = ${skillRunId}`;
+  return rows.map((r) => ({ id: r.id, agentId: r.agent_id, minutesSaved: Number(r.minutes_saved) }));
+}
+export async function countWhere(table: "workflows" | "opportunities" | "ai_employees", orgId: string): Promise<number> {
+  const [r] = await conn()<{ n: number }[]>`select count(*)::int as n from ${conn()(table)} where org_id = ${orgId}`;
+  return r.n;
+}
+export async function auditCount(orgId: string, action: string, entityId: string): Promise<number> {
+  const [r] = await conn()<{ n: number }[]>`select count(*)::int as n from audit_log where org_id = ${orgId} and action = ${action} and entity_id = ${entityId}`;
+  return r.n;
+}
+export async function brainDocByTitle(orgId: string, title: string): Promise<{ id: string; title: string } | null> {
+  const [r] = await conn()<{ id: string; title: string }[]>`select id, title from knowledge_documents where org_id = ${orgId} and title = ${title} order by created_at desc limit 1`;
+  return r ?? null;
+}
+export async function skillRunStatus(id: string): Promise<string | null> {
+  const [r] = await conn()<{ status: string }[]>`select status from skill_runs where id = ${id}`;
+  return r?.status ?? null;
+}
+export async function latestSkillRunId(aiEmployeeId: string): Promise<string | null> {
+  const [r] = await conn()<{ id: string }[]>`select id from skill_runs where ai_employee_id = ${aiEmployeeId} order by created_at desc limit 1`;
+  return r?.id ?? null;
+}

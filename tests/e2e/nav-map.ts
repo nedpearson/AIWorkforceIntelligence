@@ -11,6 +11,10 @@ const ALL: Role[] = ["owner", "manager", "consultant"];
 const ADMINS: Role[] = ["owner", "consultant"];
 
 export const APP_NAV: NavEntry[] = [
+  { group: "AI Workforce", testid: "nav-brain", path: "/app/brain", h1: "AI Brain", roles: ALL },
+  { group: "AI Workforce", testid: "nav-workforce", path: "/app/workforce", h1: "Your AI Workforce", roles: ALL },
+  { group: "AI Workforce", testid: "nav-experience", path: "/app/experience", h1: "Meet your new AI workforce", roles: ALL },
+  { group: "AI Workforce", testid: "nav-org-chart", path: "/app/workforce/org-chart", h1: "Org chart: people + AI agents", roles: ALL },
   { group: "Command", testid: "nav-executive", path: "/app", h1: "Enterprise Transformation Command Center", roles: ALL },
   { group: "Command", testid: "nav-business", path: "/app/business", h1: "Business Intelligence", roles: ALL },
   { group: "Command", testid: "nav-evaluation", path: "/app/evaluation", h1: "Company Transformation Score", roles: ALL },
@@ -41,6 +45,22 @@ export const APP_NAV: NavEntry[] = [
 ];
 
 export const navFor = (role: Role) => APP_NAV.filter((n) => n.roles.includes(role));
+
+/**
+ * Simple-mode sidebar (SIMPLE_NAV in app-shell.tsx): the five entry points + AI Brain (+ the assistant button).
+ * Managers/employees/viewers default to Simple; owners/admins/consultants to Advanced. The choice is stored per user in
+ * localStorage `bb-nav-mode:<userId>`. auth.setup.ts switches every stored role to Advanced (so APP_NAV is what the
+ * suites see); nav.spec.ts checks the Simple default with a fresh login.
+ */
+export const SIMPLE_NAV: { testid: string; path: string; h1: string }[] = [
+  { testid: "snav-home", path: "/app", h1: "Enterprise Transformation Command Center" },
+  { testid: "snav-business", path: "/app/business", h1: "Business Intelligence" },
+  { testid: "snav-team", path: "/app/experience", h1: "Meet your new AI workforce" },
+  { testid: "snav-demo", path: "/app/experience", h1: "Meet your new AI workforce" },
+  { testid: "snav-work", path: "/app/workforce", h1: "Your AI Workforce" },
+  { testid: "snav-savings", path: "/app/savings", h1: "Every dollar, traced." },
+  { testid: "snav-brain", path: "/app/brain", h1: "AI Brain" },
+];
 export const EXEC_H1 = "Enterprise Transformation Command Center";
 
 /**

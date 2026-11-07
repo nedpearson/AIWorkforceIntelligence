@@ -89,3 +89,39 @@ worked around in the spec with a note, or captured as a `test.fixme` that points
    making `collection.spec.ts` order-dependent. The spec now completes its own campaigns.
 10. **Crawl hazard**: a select on /app/settings/members saves on change; an unrestricted crawl promoted the seeded manager
     to owner. The crawl only changes view/filter controls now; the manager row was restored.
+
+## Phase B verification (AI Workforce, 2026-11-07) — all fixed in app code
+
+1. **Floating "Ask AI" launcher covered the Send button on `/app/assistant`** (`assistant-search.spec.ts` failed: the click
+   on `assistant-send` was intercepted by `assistant-launcher`; the panel also duplicated the page's `assistant-*` testids).
+   Fixed in `src/components/assistant/assistant-panel.tsx`: no launcher/panel on `/app/assistant` (it is the assistant).
+2. **Launcher failed WCAG 2.5.3 Label in Name** (axe `label-content-name-mismatch`, serious, on every page): visible "Ask AI",
+   accessible name "Open the AI assistant (press / or Ctrl+K)". Fixed: name comes from the visible text; the hint is a `title`.
+3. **Demo PO register could never match** — `parsePoRegister` required ≥ 3 digits right after `PO-`, so the AI Brain demo
+   register's `PO-24-1194` rows were ignored and every live invoice reported "no PO source connected". Repro: pilot Charlotte at
+   act_with_approval, live `process_invoice` with `Purchase Order: PO-24-1194` → `poMatch.status = "no_source"`. Fixed in
+   `src/engine/skills/invoice.ts` (year-prefixed numbers, ≥ 3 digits total); unit test in `skills-parser.test.ts`.
+4. **Pilot AI employees had no runtime agent** → live skill runs never reached the run ledger, so no verified savings could
+   ever be measured for them (`employeeFinancials` note "No executable agent is linked"). Fixed: `setStatus(…, "pilot"|"active")`
+   calls the new `src/engine/workforce/pilot-agent.ts#ensurePilotAgent` — reuses the employee's / opportunity's agent, else
+   creates one from the matching template (process_invoice → `ap_ar_invoice_intake`), status `deployed`, internal runtime,
+   schedule removed, version 1 recorded, audited (`agent.created` + `ai_employee.agent_linked`); never changes permission or
+   the opportunity's status. Unit-tested in `workforce.test.ts`.
+5. **"View my work" / "Review my savings" showed stale runs** after a task was run in "Assign me a task" (history.replaceState +
+   router.refresh kept the old page segment's props). Fixed in `profile.tsx`: those tabs navigate with `router.replace`.
+6. **Run history had no steps or approval** — "View my work" now lists each run's steps and its approval decision; the profile
+   Savings tab links to the linked agent's Results tab to record a measurement.
+7. **Approval summary** read "Approved by a owner and completed." and dropped the posting result. Now "Approved by an owner and
+   completed. Draft posted to BridgeBox AP queue — no accounting system connected (…)" (`src/engine/skills/index.ts`).
+8. **Workforce server actions surfaced `NEXT_REDIRECT`** as the error text when a role lacked the permission (requireCtx
+   redirects inside try/catch). Now "Your role can't do this (requires agents:write)." (`src/app/app/workforce/actions.ts`).
+9. **Manager's work queue offered "Approve" on over-threshold runs** the server then refused. Now shows "Over the approval
+   threshold — an owner or admin must approve" (server check unchanged).
+10. **Assistant navigate allow-list accepted dot segments** — `/app/workforce/../../admin` passed the prefix check and resolves
+    to `/admin`. Fixed in `isAllowedHref` (raw and percent-encoded dot segments rejected); unit + e2e tests.
+11. Crawl safety: "retire", provisioning ("Meet", "Add all 26 …"), permission/lifecycle/portrait controls and sandbox-run
+    buttons are never clicked by the crawler (a crawl click on "Retire" would have permanently retired a seeded AI employee).
+
+Known, not changed: the live approval reason cites the first AI Brain sentence that states the $5,000 threshold, which is the
+PO register's note ("Purchase orders over $5,000 follow the controller approval threshold …") rather than the AP Policy
+itself — same threshold and approver, less precise source.
