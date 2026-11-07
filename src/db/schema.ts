@@ -543,6 +543,19 @@ export const projectRisks = pgTable("project_risks", {
   createdAt: ts(),
 }, (t) => [index("risks_project").on(t.projectId), index("risks_org").on(t.orgId)]);
 
+/** Immutable agent definition versions (every save/deploy) — enables diff & rollback. */
+export const agentVersions = pgTable("agent_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  agentId: uuid("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  definition: jsonb("definition").$type<AgentDefinition>().notNull(),
+  approvalPolicy: jsonb("approval_policy").$type<ApprovalPolicy>(),
+  note: text("note"),
+  createdBy: uuid("created_by"),
+  createdAt: ts(),
+}, (t) => [uniqueIndex("agent_versions_agent_version").on(t.agentId, t.version), index("agent_versions_org").on(t.orgId)]);
+
 /** Executive decision history on opportunities (approve / reject / postpone / request analysis). */
 export const opportunityDecisions = pgTable("opportunity_decisions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -699,6 +712,6 @@ export const TENANT_TABLES = [
   "observation_campaigns", "activity_events", "workflows", "workflow_employees", "analysis_runs", "opportunities",
   "credentials", "agents", "agent_runs", "approvals", "savings_measurements", "financial_models", "projects",
   "reports", "subscriptions", "invoices", "integrations", "business_units", "locations", "project_milestones",
-  "project_risks", "opportunity_decisions", "savings_ledger", "evaluations", "benchmark_datasets", "dashboard_views",
+  "project_risks", "opportunity_decisions", "savings_ledger", "evaluations", "benchmark_datasets", "dashboard_views", "agent_versions",
 ] as const;
 export const _sql = sql;
