@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { headers } from "next/headers";
 import { ThemeGuard } from "@/components/theme-guard";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
-const jakarta = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-jakarta", display: "swap", weight: ["500", "600", "700", "800"] });
+// Self-hosted (OFL, src/app/fonts/LICENSE-*): next/font/google fetched from Google at build time and repeatedly failed
+// on GitHub Actions runners ("An error occurred in next/font"), breaking CI.
+const inter = localFont({ src: "./fonts/inter-latin-var.woff2", variable: "--font-inter", display: "swap", weight: "100 900" });
+const jakarta = localFont({ src: "./fonts/plus-jakarta-sans-latin-var.woff2", variable: "--font-jakarta", display: "swap", weight: "200 800" });
 
 export const metadata: Metadata = {
   title: { default: "BridgeBox AI Workforce Intelligence", template: "%s · BridgeBox" },
