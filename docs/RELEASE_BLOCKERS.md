@@ -25,7 +25,7 @@ next action. The live page is authoritative; this file is the snapshot of 2026-1
 | 10 | Performance targets not agreed; dashboards > 1 s at 2,000 employees; 100k untested | performance | Engineering | docs/PERFORMANCE_RESULTS.md |
 | 11 | No counsel review of notice/authorization/processor agreement | privacy_review | Legal | docs/PRIVACY.md §10 |
 | 12 | No error tracking / uptime monitoring | monitoring | Platform owner | Add Sentry (or Vercel monitoring) + an uptime probe on `/api/health` |
-| 13 | No dependency audit / SAST / secret scanning in CI (SEC-013) | security (medium) | Engineering | Add steps to ci.yml |
+| 13 | No dependency audit / SAST / secret scanning in CI (SEC-013); npm audit shows 3 high + 3 moderate advisories in production deps, rated medium on exploitability (SEC-015); 8 Dependabot alerts untriaged | security (medium) | Engineering | Overrides/upgrades; add audit, CodeQL, gitleaks steps to ci.yml |
 | 14 | Email delivery not implemented; QuickBooks/ERP/M365/Google/Salesforce connectors not built | live_integrations | Engineering | Scope per client |
 | 15 | Vercel Hobby: cron once a day; functions ≤ 60 s; analysis not chunked | monitoring / performance | Platform owner | Pro plan or external scheduler + worker for large tenants (docs/DEPLOYMENT.md) |
 

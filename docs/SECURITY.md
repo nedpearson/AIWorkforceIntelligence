@@ -157,7 +157,8 @@ details, ipHash }`. Insert failures are logged to stderr and never block the req
 
 `agent.approval.expired` `agent.approval.requested` `agent.created` `agent.definition.updated` `agent.measured`
 `agent.run.retry` `agent.run.start` `agent.settings.updated` `analysis.enqueued` `analysis.requested`
-`assistant.question` `auth.login` `auth.login_failed` `auth.mfa_failed` `auth.sso_jit_user_created`
+`assistant.question` `auth.login` `auth.login_blocked_demo` `auth.login_failed` `auth.login_rate_limited`
+`auth.mfa_failed` `auth.mfa_rate_limited` `auth.org_sessions_revoked` `auth.sessions_revoked` `auth.sso_jit_user_created`
 `auth.user_created_via_invite` `authorization.recorded` `billing.checkout_started` `billing.plan_set_locally`
 `billing.portal_opened` `billing.sync_all` `billing.synced` `billing.webhook` `branding.updated` `client.created`
 `collector.config_updated` `collector.enroll_failed` `collector.enrolled` `collector.enrollment_code_created`
@@ -165,7 +166,7 @@ details, ipHash }`. Insert failures are logged to stderr and never block the req
 `consent.withdrawn` `credential.created` `credential.deleted` `demo_data.generated` `financial_model.updated`
 `integration.configured` `integration.disconnected` `integration.tested` `invitation.accepted` `invitation.created`
 `invitation.revoked` `membership.removed` `membership.role_changed` `mfa.confirm_failed` `mfa.disable_failed`
-`mfa.disabled` `mfa.enabled` `mfa.enrollment_started` `notice.updated` `org.created_by_consultancy` `org.updated`
+`mfa.disabled` `mfa.enabled` `mfa.enrollment_started` `mfa.policy_updated` `notice.updated` `org.created_by_consultancy` `org.updated`
 `password.change_failed` `password.changed` `privacy.activity_events_deleted` `privacy.export`
 `privacy.retention_sweep` `project.deleted` `report.downloaded` `report.generated` `retention.sweep`
 

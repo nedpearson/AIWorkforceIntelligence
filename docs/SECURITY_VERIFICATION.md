@@ -62,13 +62,20 @@ collector re-prompts with the current notice. *Evidence:* `tests/unit/collect-ap
 
 **SEC-007 — Brain upload hardening (remediated, residual).** *Fix:* see `docs/SECURITY.md` §9 "Upload hardening".
 *Residual:* zip sizes are the declared ones; extraction still runs in-process. *Evidence:*
-`tests/unit/upload-security.test.ts` (8: filenames, renamed binary rejected, magic bytes, 20 MB-of-zeros docx rejected
+`tests/unit/upload-security.test.ts` (7: filenames, renamed binary rejected, magic bytes, 20 MB-of-zeros docx rejected
 by ratio, declared-size / entry-count limits, non-Word zip, quota).
 
 **SEC-009 — Platform owner without MFA (open, operational).** `nedpearson@gmail.com` owns every org and has no MFA
 (stated in the task context; not re-queried). This branch routes the `OWNER_EMAIL` account to MFA enrolment on every
 page until enrolled (`src/lib/mfa-policy.ts`) without blocking sign-in. *Next:* enrol after deploy; the live check
 *Platform owner MFA enabled* turns green.
+
+**SEC-015 — Dependency advisories (open).** `npm audit --omit=dev --json` (2026-11-07, this worktree) reported
+6 advisories in production dependencies: high — `image-size` (DoS in JXL/HEIF parsers, via `pptxgenjs`), `postcss`
+(stringify XSS, via `next`), `pptxgenjs`; moderate — `uuid` (via `exceljs`), `exceljs`, `next`. Rated **medium** here
+on exploitability: `image-size` only measures images BridgeBox embeds in generated decks; PostCSS runs at build time
+on the app's own CSS, never on user input. The project status document also lists 8 open GitHub Dependabot alerts
+(4 high) that this pass did not triage. *Next:* npm `overrides` / upgrades, re-audit, triage Dependabot.
 
 **SEC-013 — No dependency audit / SAST / secret scanning in CI (open).** *Next:* add `npm audit --omit=dev`, CodeQL,
 gitleaks to `.github/workflows/ci.yml`.
