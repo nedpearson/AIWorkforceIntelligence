@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfkit", "postgres"],
+  outputFileTracingIncludes: { "/api/admin/bootstrap": ["./drizzle/**"] },
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
   headers: async () => [{
     source: "/(.*)",
