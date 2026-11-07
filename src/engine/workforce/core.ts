@@ -218,3 +218,19 @@ export async function decideMemory(orgId: string, actor: Actor, memoryId: string
   await audit({ orgId, actorUserId: actor.userId, action: `ai_employee.memory_${decision}`, entityType: "ai_employee_memory", entityId: memoryId, details: { aiEmployeeId: row.aiEmployeeId, kind: row.kind } });
   return row;
 }
+
+/**
+ * Backfill AI-generated library portraits onto provisioned AI employees that still show a monogram (portrait added to
+ * the persona library after they were provisioned). Never overrides an uploaded/licensed portrait or a custom employee.
+ * Runs at build (scripts/bootstrap-on-build.ts) for every org; idempotent. Returns rows updated.
+ */
+export async function backfillPersonaPortraits(db: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }): Promise<number> {
+  let n = 0;
+  for (const p of PERSONAS) {
+    if (!p.portrait) continue;
+    const r = await db.execute(sql`update ai_employees set portrait_url = ${p.portrait}, portrait_provenance = 'ai_generated', updated_at = now()
+      where persona_key = ${p.key} and portrait_url is null and coalesce(portrait_provenance, 'none') = 'none'`) as { count?: number; rowCount?: number };
+    n += Number(r?.count ?? r?.rowCount ?? 0);
+  }
+  return n;
+}

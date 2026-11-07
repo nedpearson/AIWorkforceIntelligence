@@ -21,7 +21,7 @@ async function homeBandData(orgId: string, role: Parameters<typeof can>[0], mode
   });
   return {
     workflows: model?.counts.workflows ?? r.counts?.wf ?? 0, opportunities: model?.counts.opportunities ?? r.counts?.opp ?? 0,
-    aiTeam: r.team?.n ?? 0, personasAvailable: PERSONAS.length, portraits: PERSONAS.filter((p) => p.portrait).map((p) => ({ key: p.key, name: p.firstName, src: p.portrait! })),
+    aiTeam: r.team?.n ?? 0, personasAvailable: PERSONAS.length, portraits: PERSONAS.filter((p) => p.portrait).slice(0, 6).map((p) => ({ key: p.key, name: p.firstName, src: p.portrait! })),
     demoRuns: r.demos?.n ?? 0, demosAvailable: PERSONAS.length,
     working: r.team?.working ?? 0, deployedAgents: model?.tracker.deployedAgents ?? r.counts?.dep ?? 0,
     verifiedAnnual: model ? model.savings.tiers.verifiedTime.amount : null, hardSavings: model ? model.savings.tiers.realizedHard.amount : null,

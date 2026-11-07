@@ -99,7 +99,7 @@ test.describe("Acceptance — AI Workforce end to end", () => {
     const wfHours = num(await page.getByTestId("kpi-wf-hours").locator(".tabular, .font-display").first().innerText().catch(async () => page.getByTestId("kpi-wf-hours").innerText()));
     expect(Math.round(quotedHours), `rec quote hours (${quotedHours}) = workflow hours/week (${wfHours}) rounded`).toBe(Math.round(wfHours));
 
-    // ---- 3. Meet Charlotte → profile: AI designation, AI intro, monogram (no portrait file for Charlotte)
+    // ---- 3. Meet Charlotte → profile: AI designation, AI intro, AI-generated portrait (or monogram if none)
     await page.goto("/app/experience");
     await page.getByTestId("rec-meet-charlotte").click();
     await page.waitForURL((u) => u.pathname === `/app/workforce/${charlotteId}`);

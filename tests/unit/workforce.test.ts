@@ -47,7 +47,7 @@ describe("provisioning", () => {
     expect(b.created).toHaveLength(0); expect(b.existing).toHaveLength(3);
     const c = await charlotte();
     expect(c.status).toBe("draft"); expect(c.permissionLevel).toBe("read_only");
-    expect(c.portraitUrl).toBeNull(); expect(c.portraitProvenance).toBe("none");
+    expect(c.portraitUrl).toBe("/portraits/charlotte.png"); expect(c.portraitProvenance).toBe("ai_generated");
     expect(c.departmentId).toBe(dept); expect(c.opportunityId).toBe(opp);
     expect(c.intro.split(/(?<=[.!?])\s/)[0]).toMatch(/AI agent/);
     const olivia = (a.created.find((x) => x.personaKey === "olivia"))!;
@@ -236,5 +236,16 @@ describe("skills engine integration (adapter)", () => {
     expect((await setStatus(org, o, e.id, "pilot")).status).toBe("pilot");
     const f = await employeeFinancials(org, e.id, { from: new Date(Date.now() - 86_400_000), to: new Date(Date.now() + 60_000) });
     expect(f.totals.sandboxRuns).toBe(1); expect(f.totals.verifiedHoursRecovered).toBe(0); expect(f.totals.tasksCompleted).toBe(0);
+  });
+});
+
+describe("persona portraits", () => {
+  it("every library persona has an AI-generated portrait file on disk", async () => {
+    const fs = await import("node:fs"); const path = await import("node:path");
+    const { PERSONAS } = await import("@/engine/workforce/personas");
+    for (const p of PERSONAS) {
+      expect(p.portrait, p.key).toBe(`/portraits/${p.key}.png`);
+      expect(fs.existsSync(path.join(process.cwd(), "public", p.portrait!)), `${p.key} portrait file`).toBe(true);
+    }
   });
 });
