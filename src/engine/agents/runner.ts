@@ -8,6 +8,10 @@
  *  - State (node outputs, completed action nodes, human minutes) is persisted after every node so the UI can
  *    poll and so an approval gate can suspend and later resume the run.
  *  - On failure after retries, completed action nodes are compensated in reverse order (rollback).
+ *  - Test environment (dry run): a run with trigger "test" (startRun({ dryRun: true })) never calls out. http, action
+ *    (kind http), notify webhooks and compensation log the exact request that WOULD be sent (secrets redacted) and
+ *    return a synthetic `{ dryRun: true }` marker; approval gates auto-approve with a log line; no minutesSaved or
+ *    human minutes are recorded, agents.lastRunAt is not touched, and finance excludes trigger "test" from savings.
  */
 import { and, eq } from "drizzle-orm";
 import { schema } from "@/db/client";
@@ -17,11 +21,13 @@ import { audit } from "@/lib/audit";
 import type { AgentDefinition, AgentNode, RunLog } from "@/db/schema";
 import { getPath, nextNodeId, template } from "./definition";
 import type { JobHandler } from "../jobs";
+import { TEST_TRIGGER } from "./runner-constants";
 
 type Agent = typeof schema.agents.$inferSelect;
 type Run = typeof schema.agentRuns.$inferSelect;
 export type RunState = { nodes: Record<string, unknown>; completedActions: string[]; humanMinutes: number; approvals: string[] };
-export type RunResult = { runId: string; status: Run["status"]; error?: string | null; minutesSaved?: number | null };
+export type RunResult = { runId: string; status: Run["status"]; error?: string | null; minutesSaved?: number | null; dryRun?: boolean };
+export { TEST_TRIGGER };
 
 const HTTP_TIMEOUT_MS = 15_000;
 const MAX_STEPS = 500;
@@ -32,17 +38,19 @@ class NodeError extends Error { constructor(msg: string, public readonly retryab
 // ---------------------------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------------------------
-export async function startRun(p: { orgId: string; agentId: string; trigger?: string; input?: Record<string, unknown>; actorUserId?: string | null }): Promise<RunResult> {
+export async function startRun(p: { orgId: string; agentId: string; trigger?: string; input?: Record<string, unknown>; actorUserId?: string | null; dryRun?: boolean }): Promise<RunResult> {
   const { orgId, agentId } = p;
   const input = sanitizeInput(p.input ?? {});
+  // A dry run is identified by its trigger; a caller cannot create a "test" run that calls out, nor a live run labelled "test".
+  const trigger = p.dryRun ? TEST_TRIGGER : (p.trigger && p.trigger !== TEST_TRIGGER ? p.trigger : "manual");
   const runId = await withTenant(orgId, async (tx) => {
     const [agent] = await tx.select({ id: schema.agents.id, status: schema.agents.status }).from(schema.agents).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, orgId))).limit(1);
     if (!agent) throw new Error("agent not found");
     if (agent.status === "retired") throw new Error("agent is retired");
-    const [run] = await tx.insert(schema.agentRuns).values({ orgId, agentId, status: "queued", trigger: p.trigger ?? "manual", input, logs: [], output: {} }).returning({ id: schema.agentRuns.id });
+    const [run] = await tx.insert(schema.agentRuns).values({ orgId, agentId, status: "queued", trigger, input, logs: [], output: {} }).returning({ id: schema.agentRuns.id });
     return run.id;
   });
-  await audit({ orgId, actorUserId: p.actorUserId ?? null, actorType: p.actorUserId ? "user" : "system", action: "agent.run.start", entityType: "agent_run", entityId: runId, details: { agentId, trigger: p.trigger ?? "manual" } });
+  await audit({ orgId, actorUserId: p.actorUserId ?? null, actorType: p.actorUserId ? "user" : "system", action: p.dryRun ? "agent.test_run.start" : "agent.run.start", entityType: "agent_run", entityId: runId, details: { agentId, trigger } });
   return executeRun(runId, orgId);
 }
 
@@ -130,9 +138,13 @@ class Executor {
   private logs: RunLog[];
   private secrets = new Set<string>();
   private attempt: number;
+  readonly dryRun: boolean;
+  private curNode: string | undefined;
   constructor(private orgId: string, private agent: Agent, private run: Run, private state: RunState) {
     this.logs = [...(run.logs ?? [])];
     this.attempt = run.attempt ?? 1;
+    this.dryRun = run.trigger === TEST_TRIGGER;
+    if (this.dryRun && this.logs.length === 0) this.log("info", "Dry run (test environment): no external system will be called; requests are logged instead and approvals auto-approve.");
   }
   get def(): AgentDefinition { return this.agent.definition; }
   private scope(): Record<string, unknown> { return { input: this.run.input ?? {}, nodes: this.state.nodes, run: { id: this.run.id, agentId: this.agent.id } }; }
@@ -152,11 +164,13 @@ class Executor {
     await withTenant(this.orgId, (tx) => tx.update(schema.agentRuns).set({ logs: this.logs.slice(-500), output, attempt: this.attempt, ...patch }).where(and(eq(schema.agentRuns.id, this.run.id), eq(schema.agentRuns.orgId, this.orgId))));
   }
   async finish(status: Run["status"], extra: { error?: string | null; minutesSaved?: number | null } = {}): Promise<RunResult> {
-    const minutesSaved = extra.minutesSaved ?? null;
-    await this.persist({ status, error: extra.error ?? null, minutesSaved: minutesSaved == null ? null : String(minutesSaved), humanMinutes: String(this.state.humanMinutes), finishedAt: new Date() });
-    await withTenant(this.orgId, (tx) => tx.update(schema.agents).set({ lastRunAt: new Date() }).where(eq(schema.agents.id, this.agent.id)));
-    await audit({ orgId: this.orgId, actorType: "agent", action: `agent.run.${status}`, entityType: "agent_run", entityId: this.run.id, details: { agentId: this.agent.id, minutesSaved, error: extra.error ?? undefined } });
-    return { runId: this.run.id, status, error: extra.error ?? null, minutesSaved };
+    // Test runs never record time saved or human time: they must not feed any savings / benefit number.
+    const minutesSaved = this.dryRun ? null : (extra.minutesSaved ?? null);
+    const humanMinutes = this.dryRun ? null : String(this.state.humanMinutes);
+    await this.persist({ status, error: extra.error ?? null, minutesSaved: minutesSaved == null ? null : String(minutesSaved), humanMinutes, finishedAt: new Date() });
+    if (!this.dryRun) await withTenant(this.orgId, (tx) => tx.update(schema.agents).set({ lastRunAt: new Date() }).where(eq(schema.agents.id, this.agent.id)));
+    await audit({ orgId: this.orgId, actorType: "agent", action: this.dryRun ? `agent.test_run.${status}` : `agent.run.${status}`, entityType: "agent_run", entityId: this.run.id, details: { agentId: this.agent.id, minutesSaved, error: extra.error ?? undefined, dryRun: this.dryRun || undefined } });
+    return { runId: this.run.id, status, error: extra.error ?? null, minutesSaved, ...(this.dryRun ? { dryRun: true } : {}) };
   }
   async fail(error: string): Promise<RunResult> {
     this.log("error", error);
@@ -176,6 +190,13 @@ class Executor {
 
       if (node.type === "approval") {
         const gate = this.approvalRequired(node);
+        if (gate && this.dryRun) {
+          const requestedAction = this.redactStr(template(String(node.config.action ?? node.label), this.scope()));
+          this.log("info", `Dry run: approval auto-approved — a live run would pause here and ask a ${this.agent.approvalPolicy?.approverRole ?? "manager"} to approve "${requestedAction}"`, node.id, { dryRun: true });
+          this.state.nodes[node.id] = { dryRun: true, autoApproved: true, requestedAction };
+          await this.persist({});
+          cur = nextNodeId(this.def, node, "approved"); continue;
+        }
         if (gate) return this.requestApproval(node);
         this.log("info", `Approval skipped by policy (${this.agent.approvalPolicy?.mode ?? "sensitive_only"})`, node.id);
         this.state.nodes[node.id] = { skipped: "approval policy" };
@@ -184,8 +205,9 @@ class Executor {
       if (node.type === "end") {
         const override = node.config.minutesSavedPath ? num(getPath(this.scope(), String(node.config.minutesSavedPath))) : null;
         const minutesSaved = terminalStatus === "succeeded" ? (override ?? num(this.agent.expectedMinutesSavedPerRun)) : 0;
-        this.state.nodes[node.id] = { minutesSaved, humanMinutes: this.state.humanMinutes };
-        this.log("info", `Run finished: ${minutesSaved} min saved (${override != null ? "from output" : "agent expectation"}), ${this.state.humanMinutes} human min`, node.id);
+        this.state.nodes[node.id] = this.dryRun ? { dryRun: true, minutesSaved: null } : { minutesSaved, humanMinutes: this.state.humanMinutes };
+        if (this.dryRun) this.log("info", `Dry run finished — no minutes saved recorded (a live run would record ${minutesSaved} min)`, node.id);
+        else this.log("info", `Run finished: ${minutesSaved} min saved (${override != null ? "from output" : "agent expectation"}), ${this.state.humanMinutes} human min`, node.id);
         return this.finish(terminalStatus, { minutesSaved });
       }
 
@@ -226,6 +248,7 @@ class Executor {
     let lastErr = "";
     for (let a = 0; a <= retries.max; a++) {
       const t0 = Date.now();
+      this.curNode = node.id;
       try {
         const r = await this.executeNode(node);
         this.log("info", `${node.label} ok (${Date.now() - t0} ms)`, node.id, { attempt: a + 1, output: summarize(r.output) });
@@ -274,7 +297,7 @@ class Executor {
         this.log("info", `Notify: ${message}`, node.id);
         if (c.webhookUrl) {
           await this.httpCall({ method: "POST", url: String(c.webhookUrl), credentialId: c.credentialId, credentialProvider: c.credentialProvider, auth: c.auth, tokenField: c.tokenField, body: { message, body, runId: this.run.id, agentId: this.agent.id } }, scope);
-          (out.delivered as string[]).push("webhook");
+          if (this.dryRun) { out.dryRun = true; out.wouldDeliver = ["webhook"]; } else (out.delivered as string[]).push("webhook");
         }
         if (c.email) out.email = { to: template(String((c.email as Record<string, unknown>).to ?? ""), scope), delivered: false, reason: "Email delivery is not part of the internal runtime. Use the n8n runtime (SMTP node) or add a webhookUrl to this notify node." };
         return { output: out };
@@ -292,34 +315,53 @@ class Executor {
         const rows = await withTenant(this.orgId, (tx) => tx.select({ id: schema.credentials.id, provider: schema.credentials.provider }).from(schema.credentials).where(eq(schema.credentials.orgId, this.orgId)));
         id = rows.find((r) => ids.includes(r.id) && r.provider === c.credentialProvider)?.id ?? null;
       }
-      if (!id) throw new NodeError(`no ${c.credentialProvider} credential attached to this agent — add one under Agents → Credentials and attach it`, false);
+      if (!id) {
+        if (this.dryRun) { this.log("warn", `Dry run: no ${c.credentialProvider} credential attached — placeholders are used; a live run would fail here`); return null; }
+        throw new NodeError(`no ${c.credentialProvider} credential attached to this agent — add one under Agents → Credentials and attach it`, false);
+      }
     }
     if (!id) return null;
     const row = await withTenant(this.orgId, async (tx) => (await tx.select().from(schema.credentials).where(and(eq(schema.credentials.id, id!), eq(schema.credentials.orgId, this.orgId))).limit(1))[0]);
-    if (!row) throw new NodeError(`credential ${id} not found in this organization`, false);
+    if (!row) {
+      if (this.dryRun) { this.log("warn", `Dry run: credential ${id} not found in this organization — a live run would fail here`); return null; }
+      throw new NodeError(`credential ${id} not found in this organization`, false);
+    }
     let secret: Record<string, string> = {};
     try { const parsed = JSON.parse(decrypt(row.secretEnc)); secret = typeof parsed === "object" && parsed ? parsed : { value: String(parsed) }; } catch { secret = { value: decrypt(row.secretEnc) }; }
     for (const v of Object.values(secret)) if (typeof v === "string" && v.length >= 3) this.secrets.add(v);
-    await withTenant(this.orgId, (tx) => tx.update(schema.credentials).set({ lastUsedAt: new Date() }).where(eq(schema.credentials.id, row.id)));
+    if (!this.dryRun) await withTenant(this.orgId, (tx) => tx.update(schema.credentials).set({ lastUsedAt: new Date() }).where(eq(schema.credentials.id, row.id)));
     return secret;
   }
 
   private async httpCall(c: Record<string, unknown>, scope: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const secret = (await this.credential(c)) ?? {};
+    const resolved = await this.credential(c);
+    // Dry run without a usable credential: fill {{secret.x}} with visible placeholders so the request shape can still be shown.
+    const secret: Record<string, string> = resolved ?? (this.dryRun ? placeholderSecret(c) : {});
     const s = { ...scope, secret };
     const url = template(String(c.url ?? ""), s);
-    if (!/^https?:\/\//i.test(url)) throw new NodeError(`invalid url "${this.redactStr(url)}"`, false);
+    const problems: string[] = [];
+    const bad = (m: string) => { if (this.dryRun) { problems.push(m); return; } throw new NodeError(m, false); };
+    if (!/^https?:\/\//i.test(url) && !(this.dryRun && url.startsWith("[secret."))) bad(`invalid url "${this.redactStr(url)}"`);
     const method = String(c.method ?? "GET").toUpperCase();
     const headers: Record<string, string> = { accept: "application/json" };
     for (const [k, v] of Object.entries((c.headers ?? {}) as Record<string, string>)) headers[k.toLowerCase()] = template(String(v), s);
     const auth = c.auth ? String(c.auth) : null;
-    if (auth === "bearer") { const tok = secret[String(c.tokenField ?? "token")]; if (!tok) throw new NodeError(`credential has no "${c.tokenField ?? "token"}" field`, false); headers.authorization = `Bearer ${tok}`; }
-    if (auth === "basic") { const u = secret[String(c.userField ?? "user")], p = secret[String(c.passField ?? "password")]; if (u == null || p == null) throw new NodeError("credential lacks basic-auth fields", false); headers.authorization = `Basic ${Buffer.from(`${u}:${p}`).toString("base64")}`; }
-    if (auth === "header") { const name = String(c.authHeader ?? "x-api-key"); const v = secret[String(c.tokenField ?? "apiKey")]; if (!v) throw new NodeError(`credential has no "${c.tokenField ?? "apiKey"}" field`, false); headers[name.toLowerCase()] = v; }
+    if (auth === "bearer") { const tok = secret[String(c.tokenField ?? "token")]; if (!tok) bad(`credential has no "${c.tokenField ?? "token"}" field`); else headers.authorization = `Bearer ${tok}`; }
+    if (auth === "basic") { const u = secret[String(c.userField ?? "user")], p = secret[String(c.passField ?? "password")]; if (u == null || p == null) bad("credential lacks basic-auth fields"); else headers.authorization = `Basic ${Buffer.from(`${u}:${p}`).toString("base64")}`; }
+    if (auth === "header") { const name = String(c.authHeader ?? "x-api-key"); const v = secret[String(c.tokenField ?? "apiKey")]; if (!v) bad(`credential has no "${c.tokenField ?? "apiKey"}" field`); else headers[name.toLowerCase()] = v; }
     let body: string | undefined;
     if (c.body != null && method !== "GET" && method !== "HEAD") {
       body = typeof c.body === "string" ? template(c.body, s) : JSON.stringify(deepTemplate(c.body, s));
       headers["content-type"] ??= "application/json";
+    }
+    if (this.dryRun) {
+      // Basic-auth headers carry base64(user:pass) — redact the encoded form too.
+      if (headers.authorization?.startsWith("Basic ")) this.secrets.add(headers.authorization.slice(6));
+      let parsedBody: unknown = body;
+      try { parsedBody = body ? JSON.parse(body) : undefined; } catch { /* keep text */ }
+      const request = this.redact({ method, url, headers, ...(parsedBody !== undefined ? { body: parsedBody } : {}) }) as Record<string, unknown>;
+      this.log("info", `Dry run: would send ${method} ${this.redactStr(url)}`, this.curNode, { request, ...(problems.length ? { wouldFail: problems } : {}) });
+      return { dryRun: true, request, status: null, ok: null, ...(problems.length ? { wouldFail: problems } : {}) };
     }
     const timeout = Math.min(num(c.timeoutMs) || HTTP_TIMEOUT_MS, 60_000);
     let res: Response;
@@ -357,6 +399,7 @@ class Executor {
       if (!node?.compensate) continue;
       const comp = node.compensate;
       const kind = String(comp.kind ?? "log");
+      this.curNode = node.id;
       try {
         if (kind === "http") { const out = await this.httpCall(comp, this.scope()); this.log("info", `Rolled back "${node.label}"${comp.note ? ` (${comp.note})` : ""}`, node.id, { compensation: summarize(out) }); }
         else this.log("info", `Rollback note for "${node.label}": ${template(String(comp.message ?? comp.note ?? "manual compensation required"), this.scope())}`, node.id);
@@ -391,6 +434,15 @@ async function loadRun(runId: string, orgIdHint?: string): Promise<{ run: Run; a
     if (!agent) return null;
     return { run, agent };
   });
+}
+/** For dry runs without a credential: `{{secret.baseUrl}}` → "[secret.baseUrl]" so the logged request stays readable. */
+function placeholderSecret(c: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of JSON.stringify(c).matchAll(/secret\.([a-zA-Z0-9_]+)/g)) out[m[1]] = `[secret.${m[1]}]`;
+  for (const k of [c.tokenField, c.userField, c.passField].filter(Boolean)) out[String(k)] ??= `[secret.${String(k)}]`;
+  if (c.auth === "bearer") out.token ??= "[secret.token]";
+  if (c.auth === "basic") { out.user ??= "[secret.user]"; out.password ??= "[secret.password]"; }
+  return out;
 }
 function readState(run: Run): RunState {
   const o = (run.output ?? {}) as { nodes?: Record<string, unknown>; state?: Partial<RunState> };

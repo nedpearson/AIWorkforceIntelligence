@@ -12,7 +12,7 @@ import { fmtNum } from "@/lib/utils";
 export const metadata = { title: "Search" };
 export const dynamic = "force-dynamic";
 
-type Hit = { id: string; title: string; subtitle: string; href: string; badge?: { text: string; tone?: "neutral" | "brand" | "money" | "warn" | "danger" | "info" | "verified" | "projected" } };
+type Hit = { id: string; title: string; subtitle: string; href: string; badge?: { text: string; tone?: import("@/components/ui").Tone } };
 type Group = { key: string; label: string; icon: React.ComponentType<{ size?: number; className?: string }>; hits: Hit[] };
 
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {

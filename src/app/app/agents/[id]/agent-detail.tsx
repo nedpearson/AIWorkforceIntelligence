@@ -2,22 +2,29 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Play, Pause, Power, Archive, UploadCloud, RefreshCw, ChevronLeft, RotateCcw } from "lucide-react";
+import { Play, Pause, Power, Archive, UploadCloud, RefreshCw, ChevronLeft, RotateCcw, Bot, FlaskConical, CalendarClock, Clock, CircleCheck, DollarSign, Activity } from "lucide-react";
+import { Tabs, KpiCard, StatusPill } from "@/components/ui/enterprise";
+import { DrilldownModal, type Drill } from "@/components/dashboard/stat-tile";
+import type { AgentMetrics } from "@/engine/agents/portfolio";
+import { VersionsTab } from "./versions-tab";
+import { TestTab } from "./test-tab";
 import { Badge, Button, Card, CardHeader, Empty, Input, Modal, PageHeader, Select, Table, Th, Td, Textarea, Tooltip, BasisChip } from "@/components/ui";
 import { CalcTreeView } from "@/components/calc-tree";
-import { fmtNum, fmtUSD, cn } from "@/lib/utils";
+import { fmtNum, fmtUSD, fmtPct, cn } from "@/lib/utils";
 import type { AgentDefinition, ApprovalPolicy, CalcTree, RunLog } from "@/db/schema";
 import { CATEGORY_LABELS, type AgentCategory, type RequiredCredential } from "@/engine/agents/templates";
 import { setAgentStatus, runAgentNow, retryRun, getRun, decideApproval, pushAgentToN8n, pullN8nRuns, checkN8n, recordMeasurement, updateAgentSettings } from "../actions";
-import { STATUS_TONE, RUN_TONE, ago } from "../agents-list";
+import { RUN_TONE, ago } from "../agents-list";
 import { FlowBuilder } from "./flow-builder";
 
 export type RunRow = { id: string; status: string; trigger: string; createdAt: string; startedAt: string | null; finishedAt: string | null; minutesSaved: number | null; humanMinutes: number; error: string | null; currentNodeId: string | null };
 export type ApprovalRow = { id: string; runId: string; nodeId: string; status: string; requestedAction: string; payload: Record<string, unknown>; createdAt: string; expiresAt: string | null; decisionNote: string | null; decidedAt: string | null };
 export type MeasurementRow = { id: string; periodStart: string; periodEnd: string; method: string; runs: number; hoursSaved: number; dollarsSaved: number; costIncurred: number; basis: "observed" | "estimated" | "assumed"; calculation: CalcTree };
+export type VersionRow = { id: string; version: number; definition: AgentDefinition; approvalPolicy: ApprovalPolicy | null; note: string | null; createdAt: string; by: string };
 type AgentData = { id: string; name: string; category: string; templateKey: string; status: string; runtime: string; externalId: string | null; definition: AgentDefinition; credentialIds: string[]; approvalPolicy: ApprovalPolicy; expectedMinutesSavedPerRun: number; baselineMinutesPerRun: number; monthlyCost: number; deployedAt: string | null; lastRunAt: string | null; workflowId: string | null };
-type Props = { agent: AgentData; template: { description: string; requiredCredentials: RequiredCredential[]; exampleInput: Record<string, unknown> } | null; opportunity: { id: string; title: string; status: string; realizable: number; calculation: CalcTree; basis: "observed" | "estimated" | "assumed" } | null; runs: RunRow[]; approvals: ApprovalRow[]; measurements: MeasurementRow[]; beforeAfter: CalcTree | null; credentials: { id: string; name: string; provider: string }[]; n8n: { configured: boolean; status: string; lastError: string | null }; perms: { write: boolean; approve: boolean }; initialTab: string };
-const TABS = ["overview", "flow", "runs", "approvals", "results"] as const;
+type Props = { agent: AgentData; template: { description: string; requiredCredentials: RequiredCredential[]; exampleInput: Record<string, unknown> } | null; opportunity: { id: string; title: string; status: string; realizable: number; calculation: CalcTree; basis: "observed" | "estimated" | "assumed" } | null; runs: RunRow[]; approvals: ApprovalRow[]; measurements: MeasurementRow[]; beforeAfter: CalcTree | null; credentials: { id: string; name: string; provider: string }[]; n8n: { configured: boolean; status: string; lastError: string | null }; perms: { write: boolean; approve: boolean }; initialTab: string; versions: VersionRow[]; metrics: AgentMetrics | null; windowDays: number; timezone: string };
+const TABS = ["overview", "flow", "test", "runs", "approvals", "versions", "results"] as const;
+const TAB_LABEL: Record<(typeof TABS)[number], string> = { overview: "Overview", flow: "Flow", test: "Test environment", runs: "Runs", approvals: "Approvals", versions: "Versions", results: "Results" };
 const dur = (a: string | null, b: string | null) => { if (!a) return "—"; const ms = (b ? new Date(b).getTime() : Date.now()) - new Date(a).getTime(); return ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 60000)} min`; };
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -38,25 +45,29 @@ export function AgentDetail(p: Props) {
     const r = await act("run", () => runAgentNow({ agentId: a.id, input }), "Run started");
     if (r.ok && "run" in r) { const run = r.run as { runId: string; status: string }; setRunModal(false); if (run.runId) { setTab("runs"); setDrawer(run.runId); } setFlash({ ok: true, text: `Run ${run.status.replace("_", " ")}` }); }
   }
+  const latestVersion = p.versions[0]?.version ?? null;
   return (
     <div>
-      <PageHeader title={<span className="flex items-center gap-2">{a.name}<Badge tone={STATUS_TONE[a.status] ?? "neutral"}>{a.status}</Badge><Badge tone="neutral">{a.runtime}</Badge></span>} subtitle={`${CATEGORY_LABELS[a.category as AgentCategory] ?? a.category} · template ${a.templateKey}${a.deployedAt ? ` · deployed ${ago(a.deployedAt)}` : ""} · last run ${ago(a.lastRunAt)}`}
+      <PageHeader hero eyebrow="AI Agent Command Center" icon={<Bot size={22} className="text-cyan-300" />}
+        title={<span className="flex flex-wrap items-center gap-2">{a.name}<StatusPill status={a.status} /></span>}
+        subtitle={`${CATEGORY_LABELS[a.category as AgentCategory] ?? a.category} · ${a.runtime} runtime · template ${a.templateKey}${latestVersion ? ` · v${latestVersion}` : ""}${a.deployedAt ? ` · deployed ${ago(a.deployedAt)}` : ""} · last run ${ago(a.lastRunAt)}`}
         actions={<>
-          <Button variant="secondary" href="/app/agents"><ChevronLeft size={15} />All agents</Button>
+          <Button variant="glass" href="/app/agents" data-testid="agent-back"><ChevronLeft size={15} />All agents</Button>
           {p.perms.write && a.status !== "retired" && <>
-            {a.status !== "deployed" && <Button onClick={() => act("deploy", () => setAgentStatus({ agentId: a.id, status: "deployed" }), "Deployed")} loading={busy === "deploy"} data-testid="agent-deploy"><Power size={15} />Deploy</Button>}
-            {a.status === "deployed" && <Button variant="secondary" onClick={() => act("pause", () => setAgentStatus({ agentId: a.id, status: "paused" }), "Paused")} loading={busy === "pause"} data-testid="agent-pause"><Pause size={15} />Pause</Button>}
-            <Button variant="secondary" onClick={() => setRunModal(true)} data-testid="agent-run-now"><Play size={15} />Run now</Button>
-            {a.runtime === "n8n" && <Button variant="secondary" onClick={() => act("push", () => pushAgentToN8n({ agentId: a.id }), "Pushed to n8n")} loading={busy === "push"} data-testid="agent-push-n8n"><UploadCloud size={15} />{a.externalId ? "Update in n8n" : "Push to n8n"}</Button>}
-            <Button variant="ghost" onClick={() => confirm("Retire this agent? It stops running and is kept for history.") && act("retire", () => setAgentStatus({ agentId: a.id, status: "retired" }), "Retired")} loading={busy === "retire"} data-testid="agent-retire"><Archive size={15} />Retire</Button>
+            <Button variant="glass" onClick={() => setTab("test")} data-testid="agent-test-run"><FlaskConical size={15} />Test run</Button>
+            <Button variant="glass" onClick={() => setRunModal(true)} data-testid="agent-run-now"><Play size={15} />Run now</Button>
+            {a.runtime === "n8n" && <Button variant="glass" onClick={() => act("push", () => pushAgentToN8n({ agentId: a.id }), "Pushed to n8n")} loading={busy === "push"} data-testid="agent-push-n8n"><UploadCloud size={15} />{a.externalId ? "Update in n8n" : "Push to n8n"}</Button>}
+            {a.status === "deployed" && <Button variant="glass" onClick={() => act("pause", () => setAgentStatus({ agentId: a.id, status: "paused" }), "Paused")} loading={busy === "pause"} data-testid="agent-pause"><Pause size={15} />Pause</Button>}
+            <Button variant="glass" onClick={() => confirm("Retire this agent? It stops running and is kept for history.") && act("retire", () => setAgentStatus({ agentId: a.id, status: "retired" }), "Retired")} loading={busy === "retire"} data-testid="agent-retire"><Archive size={15} />Retire</Button>
+            {a.status !== "deployed" && <Button variant="gradient" onClick={() => act("deploy", () => setAgentStatus({ agentId: a.id, status: "deployed" }), "Deployed — version recorded")} loading={busy === "deploy"} data-testid="agent-deploy"><Power size={15} />Deploy</Button>}
           </>}
         </>} />
-      {flash && <div className={cn("mb-3 rounded-lg px-3 py-2 text-xs", flash.ok ? "bg-money-soft text-money" : "bg-danger-soft text-danger")} role="status" data-testid="agent-flash">{flash.text}</div>}
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-border" role="tablist">
-        {TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} data-testid={`tab-${t}`} className={cn("whitespace-nowrap border-b-2 px-3 py-2 text-sm capitalize", tab === t ? "border-brand font-medium text-brand" : "border-transparent text-ink-2 hover:text-ink")}>{t}{t === "approvals" && pending.length > 0 && <Badge tone="warn" className="ml-1">{pending.length}</Badge>}</button>)}
-      </div>
+      {flash && <div className={cn("mb-3 rounded-xl px-3 py-2 text-xs", flash.ok ? "bg-emerald-soft text-emerald-ink" : "bg-coral-soft text-coral-ink")} role="status" data-testid="agent-flash">{flash.text}</div>}
+      <Tabs testid="tab" value={tab} onChange={setTab} tabs={TABS.map((t) => ({ key: t, label: TAB_LABEL[t], count: t === "approvals" && pending.length ? pending.length : t === "versions" && p.versions.length ? p.versions.length : undefined }))} />
 
       {tab === "overview" && <Overview p={p} act={act} busy={busy} />}
+      {tab === "test" && <TestTab agentId={a.id} definition={a.definition} exampleInput={p.template?.exampleInput ?? {}} canWrite={p.perms.write && a.status !== "retired"} testRuns={p.runs.filter((r) => r.trigger === "test")} onDone={() => router.refresh()} />}
+      {tab === "versions" && <VersionsTab agentId={a.id} versions={p.versions} current={a.definition} canWrite={p.perms.write && a.status !== "retired"} onDone={() => router.refresh()} />}
       {tab === "flow" && <FlowBuilder agentId={a.id} definition={a.definition} canWrite={p.perms.write && a.status !== "retired"} onSaved={() => router.refresh()} />}
       {tab === "runs" && <Runs p={p} act={act} busy={busy} drawer={drawer} setDrawer={setDrawer} />}
       {tab === "approvals" && <Approvals approvals={p.approvals} canApprove={p.perms.approve} act={act} busy={busy} />}
@@ -78,7 +89,18 @@ function Overview({ p, act, busy }: { p: Props; act: Act; busy: string }) {
   const [policy, setPolicy] = React.useState<ApprovalPolicy>(a.approvalPolicy); const [credIds, setCredIds] = React.useState<string[]>(a.credentialIds);
   const [n8nMsg, setN8nMsg] = React.useState<string>(p.n8n.configured ? `Configured · last status: ${p.n8n.status}${p.n8n.lastError ? ` (${p.n8n.lastError})` : ""}` : "n8n not configured — set N8N_BASE_URL and N8N_API_KEY or add it in Settings → Integrations");
   const nodes = a.definition.nodes;
+  const m = p.metrics; const [drill, setDrill] = React.useState<{ title: string; drill: Drill } | null>(null);
   return (
+    <div className="space-y-4">
+    {m && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 stagger" data-testid="agent-kpis">
+      <KpiCard testid="agent-kpi-tasks" label={`Tasks completed (${p.windowDays}d)`} value={m.tasksCompleted} format={(n) => fmtNum(n)} accent="cyan" basis="observed" icon={<Activity size={16} />} caption={`${m.humanInterventions} human approval${m.humanInterventions === 1 ? "" : "s"} · test runs excluded`} />
+      <KpiCard testid="agent-kpi-success" label="Success rate" value={m.successRate} format={(n) => fmtPct(n, 0)} accent={m.successRate != null && m.successRate < 0.8 ? "coral" : "emerald"} basis="observed" icon={<CircleCheck size={16} />} emptyText="no finished runs" caption={`${m.succeeded} ok · ${m.failed} failed${m.consecutiveFailures ? ` · ${m.consecutiveFailures} failing in a row` : ""}`} />
+      <KpiCard testid="agent-kpi-hours" label={`Hours saved (${p.windowDays}d)`} value={m.hoursSaved} format={(n) => fmtNum(n, 1)} accent="emerald" basis="observed" icon={<Clock size={16} />} caption={`valued at ${fmtUSD(m.hourly)}/h loaded`}
+        onClick={() => setDrill({ title: "Financial benefit", drill: { tree: m.trees.benefit, meaning: "Hours saved by succeeded runs × the loaded hourly cost of the people who perform the linked workflow (finance run-ledger method)." } })} />
+      <KpiCard testid="agent-kpi-net" label={`Net benefit (${p.windowDays}d)`} value={m.netBenefit} format={(n) => fmtUSD(n)} accent="gold" basis="estimated" icon={<DollarSign size={16} />} caption={`${fmtUSD(m.benefit)} benefit − ${fmtUSD(m.operatingCost)} cost${m.roi != null ? ` · ROI ${Math.round(m.roi * 100)}%` : ""}`}
+        onClick={() => setDrill({ title: "Net benefit", drill: { tree: m.trees.net, meaning: "Financial benefit minus operating cost in the window. Projected until recorded as a measurement on the Results tab; capacity freed is not a payroll reduction." } })} />
+    </div>}
+    {drill && <DrilldownModal open onClose={() => setDrill(null)} title={drill.title} drill={drill.drill} />}
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
         <Card>
@@ -95,6 +117,15 @@ function Overview({ p, act, busy }: { p: Props; act: Act; busy: string }) {
         </Card>
       </div>
       <div className="space-y-4">
+        <Card data-testid="agent-schedule">
+          <CardHeader title={<span className="flex items-center gap-2"><CalendarClock size={15} />Schedule</span>} />
+          {m?.schedule ? <dl className="space-y-1 text-sm">
+            <div className="flex justify-between gap-2"><dt className="text-ink-2">Cron</dt><dd className="font-mono text-xs">{m.schedule.cron}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-ink-2">Means</dt><dd className="text-right text-xs">{m.schedule.description}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-ink-2">Next run</dt><dd className="text-right text-xs tabular" data-testid="agent-next-run">{m.schedule.nextRunAt ? new Date(m.schedule.nextRunAt).toLocaleString("en-US", { timeZone: p.timezone, dateStyle: "medium", timeStyle: "short" }) + ` (${p.timezone})` : m.schedule.valid ? "none within a year" : "invalid expression"}</dd></div>
+            <p className="pt-1 text-[11px] text-ink-3">{a.runtime === "n8n" ? "Fires in n8n on this schedule once pushed." : a.status === "deployed" ? "The schedule is honoured by the jobs worker (npm run worker) for deployed agents." : "Deploy the agent for the schedule to take effect."}</p>
+          </dl> : <p className="text-xs text-ink-2">No schedule — this agent runs when its trigger fires (webhook, manual or another system). Add <code>schedule</code> (cron) on the Flow tab to run it on a timetable.</p>}
+        </Card>
         <Card>
           <CardHeader title="Economics" />
           <dl className="space-y-1 text-sm">
@@ -124,6 +155,7 @@ function Overview({ p, act, busy }: { p: Props; act: Act; busy: string }) {
         </Card>}
       </div>
     </div>
+    </div>
   );
 }
 
@@ -135,7 +167,7 @@ function Runs({ p, act, busy, drawer, setDrawer }: { p: Props; act: Act; busy: s
         <thead><tr><Th>Status</Th><Th>Trigger</Th><Th>Started</Th><Th>Duration</Th><Th className="text-right">Min saved</Th><Th className="text-right">Human min</Th><Th>Error</Th></tr></thead>
         <tbody>{p.runs.map((r) => (
           <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setDrawer(r.id)} data-testid={`run-row-${r.id}`}>
-            <Td><Badge tone={RUN_TONE[r.status] ?? "neutral"}>{r.status.replace("_", " ")}</Badge></Td><Td className="text-xs">{r.trigger}</Td><Td className="text-xs">{fmtDate(r.startedAt ?? r.createdAt)}</Td><Td className="text-xs tabular">{dur(r.startedAt, r.finishedAt)}</Td>
+            <Td><Badge tone={RUN_TONE[r.status] ?? "neutral"}>{r.status.replace("_", " ")}</Badge></Td><Td className="text-xs">{r.trigger === "test" ? <Badge tone="purple">test · dry run</Badge> : r.trigger}</Td><Td className="text-xs">{fmtDate(r.startedAt ?? r.createdAt)}</Td><Td className="text-xs tabular">{dur(r.startedAt, r.finishedAt)}</Td>
             <Td className="text-right tabular text-verified">{r.minutesSaved == null ? "—" : fmtNum(r.minutesSaved, 1)}</Td><Td className="text-right tabular">{fmtNum(r.humanMinutes, 1)}</Td><Td className="max-w-[260px] truncate text-xs text-danger">{r.error ?? ""}</Td>
           </tr>))}</tbody>
       </Table>
@@ -219,8 +251,9 @@ export function Approvals({ approvals, canApprove, act, busy, showAgent }: { app
 function Results({ p, act, busy }: { p: Props; act: Act; busy: string }) {
   const first = new Date(); first.setDate(1); first.setHours(0, 0, 0, 0);
   const [start, setStart] = React.useState(first.toISOString().slice(0, 10)); const [end, setEnd] = React.useState(new Date().toISOString().slice(0, 10));
-  const ledger = p.runs.filter((r) => r.status === "succeeded");
-  const totalMin = ledger.reduce((s, r) => s + (r.minutesSaved ?? 0), 0); const human = p.runs.reduce((s, r) => s + r.humanMinutes, 0);
+  const live = p.runs.filter((r) => r.trigger !== "test"); // dry runs never count
+  const ledger = live.filter((r) => r.status === "succeeded");
+  const totalMin = ledger.reduce((s, r) => s + (r.minutesSaved ?? 0), 0); const human = live.reduce((s, r) => s + r.humanMinutes, 0);
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
@@ -239,9 +272,9 @@ function Results({ p, act, busy }: { p: Props; act: Act; busy: string }) {
       </div>
       <div className="space-y-4">
         <Card>
-          <CardHeader title="Run ledger (last 100)" />
+          <CardHeader title="Run ledger (last 100)" subtitle="Live runs only — test-environment dry runs are excluded." />
           <dl className="space-y-1 text-sm">
-            <div className="flex justify-between"><dt className="text-ink-2">Successful runs</dt><dd className="tabular">{ledger.length} / {p.runs.length}</dd></div>
+            <div className="flex justify-between"><dt className="text-ink-2">Successful runs</dt><dd className="tabular">{ledger.length} / {live.length}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-2">Minutes saved <Tooltip text="Per-run minutes from the agent's expectation unless a run's output overrides it. Becomes 'verified' once recorded as a measurement." /></dt><dd className="tabular text-verified">{fmtNum(totalMin)}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-2">Human review minutes</dt><dd className="tabular">{fmtNum(human)}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-2">Net hours</dt><dd className="tabular">{fmtNum((totalMin - human) / 60, 1)}</dd></div>

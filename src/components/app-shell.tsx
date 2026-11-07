@@ -166,7 +166,7 @@ export function AppShell({ ctx, orgs, isDemo, branding, children }: { ctx: Ctx; 
           <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border border-border p-2 text-ink-2 hover:bg-surface-2" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} data-testid="theme-toggle">{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}</button>
         </header>
         {isDemo && <div className="no-print bg-[linear-gradient(90deg,rgba(245,158,11,.14),rgba(245,158,11,.06))] px-4 py-1.5 text-center text-[11px] font-semibold text-gold-ink" data-testid="demo-banner">Synthetic demo data — this organization&apos;s activity, people and costs are generated for demonstration and testing only.</div>}
-        <main id="main" className="mx-auto w-full max-w-[1440px] flex-1 px-3 py-5 sm:px-5 lg:px-8 lg:py-7">{children}</main>
+        <main id="main" className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-3 py-5 sm:px-5 lg:px-8 lg:py-7">{children}</main>
       </div>
     </div>
   );

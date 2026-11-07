@@ -7,7 +7,8 @@
  * Minutes per run are *assumed* baselines; the run ledger replaces them with observed values once deployed.
  */
 import type { AgentDefinition, AgentNode } from "@/db/schema";
-import { IMPLEMENTATION_PROFILES } from "@/engine/costing";
+import { AI, CONV, n, chain, llm, http, notify, approval, end, trigger } from "./template-helpers";
+import { LIBRARY_TEMPLATES } from "./templates-library";
 
 export type AgentCategory = "customer_service" | "scheduling" | "sales_crm" | "email_admin" | "ap_ar" | "invoice" | "reporting" | "inventory" | "marketing" | "onboarding" | "document" | "data_entry";
 export const AGENT_CATEGORIES: AgentCategory[] = ["customer_service", "scheduling", "sales_crm", "email_admin", "ap_ar", "invoice", "reporting", "inventory", "marketing", "onboarding", "document", "data_entry"];
@@ -17,38 +18,33 @@ export const CATEGORY_LABELS: Record<AgentCategory, string> = {
 };
 
 export type RequiredCredential = { provider: string; label: string; fields: string[] };
+
+/** Business functions used to group agents and the Automation Studio gallery. */
+export type BusinessFunction = "finance" | "sales" | "operations" | "customer_service" | "hr" | "marketing";
+export const BUSINESS_FUNCTIONS: { key: BusinessFunction; label: string; useCases: string[] }[] = [
+  { key: "finance", label: "Finance", useCases: ["Accounts payable", "Accounts receivable", "Invoice processing", "Reconciliation", "Expense analysis", "Collections", "Financial reporting"] },
+  { key: "sales", label: "Sales", useCases: ["Lead qualification", "CRM updates", "Scheduling", "Proposal generation", "Follow-ups", "Forecasting"] },
+  { key: "operations", label: "Operations", useCases: ["Inventory", "Purchasing", "Vendor management", "Scheduling", "Document processing", "Workflow coordination"] },
+  { key: "customer_service", label: "Customer Service", useCases: ["Email responses", "Ticket classification", "Customer inquiries", "Appointment confirmations", "Follow-ups"] },
+  { key: "hr", label: "HR", useCases: ["Onboarding", "Scheduling admin", "Document management", "Policy information", "Training coordination"] },
+  { key: "marketing", label: "Marketing", useCases: ["Campaigns", "Lead nurturing", "Content generation", "Analytics", "Segmentation"] },
+];
+export const FUNCTION_LABELS: Record<BusinessFunction, string> = Object.fromEntries(BUSINESS_FUNCTIONS.map((f) => [f.key, f.label])) as Record<BusinessFunction, string>;
+/** Fallback function for an agent whose template is unknown. */
+export const CATEGORY_FUNCTION: Record<AgentCategory, BusinessFunction> = {
+  customer_service: "customer_service", scheduling: "operations", sales_crm: "sales", email_admin: "operations", ap_ar: "finance", invoice: "finance",
+  reporting: "finance", inventory: "operations", marketing: "marketing", onboarding: "hr", document: "operations", data_entry: "operations",
+};
 export type N8nWorkflowJson = { name: string; nodes: Record<string, unknown>[]; connections: Record<string, unknown>; settings?: Record<string, unknown> };
 export type AgentTemplate = {
   key: string; category: AgentCategory; name: string; description: string;
   definition: AgentDefinition; requiredCredentials: RequiredCredential[];
   baselineMinutesPerRun: number; expectedMinutesSavedPerRun: number; monthlyCost: number;
   runtime: "internal" | "n8n"; n8nWorkflowJson?: N8nWorkflowJson;
+  /** Business function + use case for the gallery; `apps` are the desktop/web apps whose discovered workflows this template fits. */
+  fn: BusinessFunction; useCase: string; apps: string[];
 };
-
-const AI = IMPLEMENTATION_PROFILES.ai_agent.monthlyRun;
-const CONV = IMPLEMENTATION_PROFILES.conventional_automation.monthlyRun;
-const RETRIES = { max: 2, backoffMs: 500 };
-
-// ---- graph helpers --------------------------------------------------------------------------
-const n = (id: string, type: AgentNode["type"], label: string, config: Record<string, unknown> = {}, extra: Partial<AgentNode> = {}): AgentNode => ({ id, type, label, config, ...extra });
-/** Chain nodes linearly. Approval nodes get approved→next and rejected→end edges. */
-function chain(nodes: AgentNode[], extraEdges: AgentDefinition["edges"] = [], schedule?: string): AgentDefinition {
-  const edges: AgentDefinition["edges"] = [];
-  const end = nodes.find((x) => x.type === "end")!;
-  for (let i = 0; i < nodes.length - 1; i++) {
-    const a = nodes[i], b = nodes[i + 1];
-    if (a.type === "approval") { edges.push({ from: a.id, to: b.id, when: "approved" }); edges.push({ from: a.id, to: end.id, when: "rejected" }); }
-    else if (a.type === "condition") { /* explicit edges supplied by caller */ }
-    else edges.push({ from: a.id, to: b.id });
-  }
-  return { nodes, edges: [...edges, ...extraEdges], retries: RETRIES, ...(schedule ? { schedule } : {}) };
-}
-const llm = (id: string, label: string, system: string, prompt: string) => n(id, "llm", label, { system, prompt, maxTokens: 1024 });
-const http = (id: string, label: string, cfg: Record<string, unknown>, compensate?: Record<string, unknown>) => n(id, "action", label, { kind: "http", ...cfg }, compensate ? { compensate } : {});
-const notify = (id: string, message: string, extra: Record<string, unknown> = {}) => n(id, "notify", "Notify owner", { message, ...extra });
-const approval = (id: string, action: string, reviewMinutes = 2) => n(id, "approval", "Human approval", { action, reviewMinutes }, { sensitive: true });
-const end = (cfg: Record<string, unknown> = {}) => n("end", "end", "Done", cfg);
-const trigger = (label: string, cfg: Record<string, unknown> = {}) => n("trigger", "trigger", label, cfg);
+type BaseTemplate = Omit<AgentTemplate, "fn" | "useCase" | "apps">;
 
 // ---- n8n exports (real node types / typeVersions from n8n 1.x) -------------------------------
 const n8nWebhook = (name: string, path: string, pos: [number, number]) => ({ parameters: { httpMethod: "POST", path, responseMode: "onReceived", options: {} }, id: `wh-${path}`, name, type: "n8n-nodes-base.webhook", typeVersion: 2, position: pos, webhookId: path });
@@ -92,7 +88,7 @@ const conn = (pairs: [string, string, number?][]): Record<string, unknown> => {
 const N8N_SETTINGS = { executionOrder: "v1", saveExecutionProgress: true, saveManualExecutions: true };
 
 // ---- templates --------------------------------------------------------------------------------
-export const AGENT_TEMPLATES: AgentTemplate[] = [
+const BASE_TEMPLATES: BaseTemplate[] = [
   {
     key: "customer_service_reply_drafting", category: "customer_service", name: "Support reply drafter",
     description: "Reads each incoming support ticket, drafts a reply in your tone, and posts it to the ticket. Replies that mention refunds or disputes wait for a person to approve first. Needs: a helpdesk API token (Zendesk) and the Anthropic key configured on the server. Compensation: posts a correction comment if a later step fails.",
@@ -329,6 +325,29 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     ], [{ from: "valid", to: "create", when: "true" }, { from: "valid", to: "end", when: "false" }]),
   },
 ];
+
+const BASE_META: Record<string, Pick<AgentTemplate, "fn" | "useCase" | "apps">> = {
+  customer_service_reply_drafting: { fn: "customer_service", useCase: "Customer inquiries", apps: ["Zendesk", "Freshdesk", "Outlook"] },
+  scheduling_appointment_coordinator: { fn: "operations", useCase: "Scheduling", apps: ["Outlook", "Google Calendar", "Calendly"] },
+  sales_crm_lead_enrichment: { fn: "sales", useCase: "Lead qualification", apps: ["HubSpot", "Salesforce", "Outlook"] },
+  email_admin_triage: { fn: "operations", useCase: "Workflow coordination", apps: ["Outlook", "Gmail"] },
+  ap_ar_invoice_intake: { fn: "finance", useCase: "Accounts payable", apps: ["QuickBooks", "Adobe Acrobat", "Outlook", "NetSuite"] },
+  invoice_generation: { fn: "finance", useCase: "Invoice processing", apps: ["QuickBooks", "Excel", "Word"] },
+  reporting_weekly_digest: { fn: "finance", useCase: "Financial reporting", apps: ["Excel", "PowerPoint", "Power BI"] },
+  inventory_reorder: { fn: "operations", useCase: "Inventory", apps: ["NetSuite", "Excel", "QuickBooks"] },
+  marketing_social_drafts: { fn: "marketing", useCase: "Content generation", apps: ["Chrome", "Word", "Canva"] },
+  onboarding_new_hire: { fn: "hr", useCase: "Onboarding", apps: ["Workday", "BambooHR", "Outlook"] },
+  document_summarizer: { fn: "operations", useCase: "Document processing", apps: ["Adobe Acrobat", "Word", "DocuSign"] },
+  data_entry_form_to_system: { fn: "operations", useCase: "Document processing", apps: ["Excel", "Chrome"] },
+};
+
+export const AGENT_TEMPLATES: AgentTemplate[] = [...BASE_TEMPLATES.map((t) => ({ ...t, ...BASE_META[t.key] })), ...LIBRARY_TEMPLATES];
+
+/** Business function of an agent: its template's function, else the category fallback. */
+export function agentFunction(a: { templateKey?: string | null; category: string }): BusinessFunction {
+  const t = a.templateKey ? AGENT_TEMPLATES.find((x) => x.key === a.templateKey) : undefined;
+  return t?.fn ?? CATEGORY_FUNCTION[a.category as AgentCategory] ?? "operations";
+}
 
 export function getTemplate(key: string): AgentTemplate | undefined { return AGENT_TEMPLATES.find((t) => t.key === key); }
 export function templateForCategory(category: string): AgentTemplate | undefined { return AGENT_TEMPLATES.find((t) => t.category === category); }

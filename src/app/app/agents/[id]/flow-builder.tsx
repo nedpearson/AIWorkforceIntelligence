@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import type { AgentDefinition, AgentNode } from "@/db/schema";
 import { NODE_TYPES, layoutColumns, validateDefinition } from "@/engine/agents/definition";
 import { updateAgentDefinition } from "../actions";
+import { isValidCron, describeCron } from "@/engine/agents/cron";
 
 const W = 168, H = 64, GX = 70, GY = 26, PAD = 20;
 const TYPE_TONE: Record<AgentNode["type"], string> = { trigger: "border-brand bg-brand-soft/60", action: "border-money bg-money-soft/60", http: "border-info bg-info-soft/60", llm: "border-projected bg-projected-soft/60", approval: "border-warn bg-warn-soft/60", condition: "border-ink-3 bg-surface-2", transform: "border-border bg-surface", notify: "border-border bg-surface", end: "border-ink-2 bg-surface-2" };
@@ -67,9 +68,10 @@ export function FlowBuilder({ agentId, definition, canWrite, onSaved }: { agentI
   function removeEdge(i: number) { update((d) => ({ ...d, edges: d.edges.filter((_, j) => j !== i) })); }
   async function save() {
     const v = validateDefinition(def); if (!v.ok) { setMsg({ ok: false, text: v.errors.slice(0, 3).join("; ") }); return; }
+    if (def.schedule && !isValidCron(def.schedule)) { setMsg({ ok: false, text: `Schedule "${def.schedule}" is not a valid 5-field cron expression` }); return; }
     setBusy(true); const r = await updateAgentDefinition({ agentId, definition: def }); setBusy(false);
     if (!r.ok) { setMsg({ ok: false, text: r.error }); return; }
-    setDirty(false); setMsg({ ok: true, text: "Flow saved" }); onSaved(def);
+    setDirty(false); setMsg({ ok: true, text: `Flow saved as v${r.version}` }); onSaved(def);
   }
 
   return (
@@ -84,6 +86,10 @@ export function FlowBuilder({ agentId, definition, canWrite, onSaved }: { agentI
             <Button size="sm" disabled={!dirty} loading={busy} onClick={save} data-testid="flow-save"><Save size={14} />Save flow</Button>
           </>}
           {msg && <span className={cn("text-xs", msg.ok ? "text-money" : "text-danger")} role="status" data-testid="flow-msg">{msg.text}</span>}
+        </div>
+        <div className="mb-2 flex flex-wrap items-end gap-2">
+          <div className="w-48"><Input label="Schedule (cron, optional)" value={def.schedule ?? ""} disabled={!canWrite} placeholder="0 7 * * 1" onChange={(e) => update((d) => { const v = e.target.value; const { schedule: _s, ...rest } = d; void _s; return v.trim() ? { ...rest, schedule: v } : rest; })} data-testid="flow-schedule" /></div>
+          <span className={cn("pb-2 text-[11px]", def.schedule && !isValidCron(def.schedule) ? "text-danger" : "text-ink-3")}>{def.schedule ? describeCron(def.schedule) : "No schedule — runs on its trigger."}</span>
         </div>
         <div className="card overflow-auto scrollbar-thin p-0" data-testid="flow-canvas">
           <div className="relative" style={{ width: positions.width, height: positions.height, minWidth: "100%" }}>

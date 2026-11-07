@@ -34,7 +34,7 @@ export async function measureAgent(orgId: string, agentId: string, period: Perio
 /** Observed run ledger totals for a period (no money — that is the finance engine's job). */
 export async function runLedgerSummary(orgId: string, agentId: string, period: Period) {
   const rows = await withTenant(orgId, (tx) => tx.select({ status: schema.agentRuns.status, minutesSaved: schema.agentRuns.minutesSaved, humanMinutes: schema.agentRuns.humanMinutes })
-    .from(schema.agentRuns).where(and(eq(schema.agentRuns.orgId, orgId), eq(schema.agentRuns.agentId, agentId), gte(schema.agentRuns.createdAt, period.start), lt(schema.agentRuns.createdAt, period.end))));
+    .from(schema.agentRuns).where(and(eq(schema.agentRuns.orgId, orgId), eq(schema.agentRuns.agentId, agentId), sql`${schema.agentRuns.trigger} <> 'test'`, gte(schema.agentRuns.createdAt, period.start), lt(schema.agentRuns.createdAt, period.end))));
   const n = (v: unknown) => (v == null ? 0 : Number(v) || 0);
   const succeeded = rows.filter((r) => r.status === "succeeded");
   const minutesSaved = succeeded.reduce((s, r) => s + n(r.minutesSaved), 0);

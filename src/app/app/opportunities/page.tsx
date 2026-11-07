@@ -1,41 +1,59 @@
-import { eq } from "drizzle-orm";
 import { requireCtx } from "@/lib/session";
-import { withTenant } from "@/db/tenant";
-import { schema } from "@/db/client";
 import { can } from "@/lib/rbac";
-import { num } from "@/lib/utils";
-import { computeOrgFinancials } from "@/engine/finance";
-import { OpportunitiesList, type OppRow } from "./opportunities-list";
+import type { CalcTree } from "@/db/schema";
+import { analyzeOpportunities, type OppFilters } from "@/engine/opportunity-score";
+import { OPP_TYPE_LABEL } from "@/components/dashboard/opportunity-card";
+import { OpportunityCenter, type CenterRow, type CenterKpis } from "./opportunity-center";
 
-export const metadata = { title: "Opportunities" };
+export const metadata = { title: "AI Opportunity Center" };
 export const dynamic = "force-dynamic";
 
-export default async function OpportunitiesPage({ searchParams }: { searchParams: Promise<{ type?: string; status?: string; dept?: string }> }) {
+const STATUSES = ["identified", "reviewing", "approved", "postponed", "analysis_requested", "in_progress", "deployed", "verified", "rejected"];
+
+export default async function OpportunitiesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const ctx = await requireCtx("opportunities:read");
   const sp = await searchParams;
-  const [fin, raw] = await Promise.all([
-    computeOrgFinancials(ctx.orgId),
-    withTenant(ctx.orgId, async (tx) => ({
-      opps: await tx.select({ id: schema.opportunities.id, summary: schema.opportunities.summary, status: schema.opportunities.status, requiresHumanJudgment: schema.opportunities.requiresHumanJudgment, regulatoryFlag: schema.opportunities.regulatoryFlag, recommendedAgentCategory: schema.opportunities.recommendedAgentCategory, workflowId: schema.opportunities.workflowId, departmentId: schema.opportunities.departmentId, title: schema.opportunities.title, type: schema.opportunities.type, rank: schema.opportunities.rank, feasibility: schema.opportunities.feasibility, risk: schema.opportunities.risk, hoursRecoverablePerWeek: schema.opportunities.hoursRecoverablePerWeek, grossAnnualSavings: schema.opportunities.grossAnnualSavings, realizableAnnualSavings: schema.opportunities.realizableAnnualSavings, implementationCost: schema.opportunities.implementationCost, paybackMonths: schema.opportunities.paybackMonths, basis: schema.opportunities.basis }).from(schema.opportunities).where(eq(schema.opportunities.orgId, ctx.orgId)),
-      agents: await tx.select({ id: schema.agents.id, name: schema.agents.name, status: schema.agents.status, opportunityId: schema.agents.opportunityId }).from(schema.agents).where(eq(schema.agents.orgId, ctx.orgId)),
-      departments: await tx.select({ id: schema.departments.id, name: schema.departments.name }).from(schema.departments).where(eq(schema.departments.orgId, ctx.orgId)),
-      workflows: await tx.select({ id: schema.workflows.id, duplicateOfWorkflowId: schema.workflows.duplicateOfWorkflowId, name: schema.workflows.name, departmentId: schema.workflows.departmentId }).from(schema.workflows).where(eq(schema.workflows.orgId, ctx.orgId)),
-    })),
-  ]);
-  const lineById = new Map(fin.opportunities.map((l) => [l.id, l]));
-  const deptName = new Map(raw.departments.map((d) => [d.id, d.name]));
-  const wfById = new Map(raw.workflows.map((w) => [w.id, w]));
-  const rows: OppRow[] = raw.opps.map((o) => {
-    const l = lineById.get(o.id); // rejected opportunities are out of the finance scope → fall back to stored numbers
-    const wf = o.workflowId ? wfById.get(o.workflowId) : undefined; const agent = raw.agents.find((a) => a.opportunityId === o.id);
-    const deptId = o.departmentId ?? wf?.departmentId ?? null;
-    return {
-      id: o.id, title: o.title, summary: o.summary, type: o.type, status: o.status, rank: o.rank, feasibility: num(o.feasibility), risk: num(o.risk),
-      hoursRecoverablePerWeek: l?.hoursRecoverablePerWeek ?? num(o.hoursRecoverablePerWeek), grossAnnualSavings: l?.grossAnnualSavings ?? num(o.grossAnnualSavings), realizableAnnualSavings: l?.realizableAnnualSavings ?? num(o.realizableAnnualSavings),
-      implementationCost: l?.implementationCost ?? num(o.implementationCost), paybackMonths: l ? l.paybackMonths : (o.paybackMonths == null ? null : num(o.paybackMonths)), basis: o.basis, deployed: l?.deployed ?? agent?.status === "deployed",
-      requiresHumanJudgment: o.requiresHumanJudgment, regulatoryFlag: o.regulatoryFlag, duplicate: !!wf?.duplicateOfWorkflowId, departmentId: deptId, departmentName: deptId ? (deptName.get(deptId) ?? null) : null, workflowName: wf?.name ?? null,
-      agent: agent ? { id: agent.id, name: agent.name, status: agent.status } : null,
-    };
-  }).sort((a, b) => (a.rank || 999) - (b.rank || 999));
-  return <OpportunitiesList rows={rows} departments={raw.departments} canWrite={can(ctx.role, "opportunities:write")} canAutomate={can(ctx.role, "agents:write")} initial={{ type: sp.type ?? "", status: sp.status ?? "", dept: sp.dept ?? "" }} totals={{ realizable: fin.realizableAnnualSavings, hours: fin.hoursRecoverablePerWeek }} />;
+  const filters: OppFilters = { dept: sp.dept, bu: sp.bu, loc: sp.loc, status: sp.status, risk: sp.risk, type: sp.type };
+  const a = await analyzeOpportunities(ctx.orgId, filters);
+
+  const rows: CenterRow[] = a.filtered.map((o) => ({
+    id: o.id, title: o.title, summary: o.summary, type: o.type, status: o.status, rank: o.answers.priorityRank, feasibility: o.line.feasibility, risk: o.line.risk,
+    hoursRecoverablePerWeek: o.line.hoursRecoverablePerWeek, grossAnnualSavings: o.line.grossAnnualSavings, realizableAnnualSavings: o.line.realizableAnnualSavings,
+    implementationCost: o.line.implementationCost, paybackMonths: o.line.paybackMonths, basis: o.basis, deployed: o.line.deployed, requiresHumanJudgment: o.requiresHumanJudgment,
+    regulatoryFlag: o.regulatoryFlag, duplicate: o.duplicate, departmentId: o.departmentId, departmentName: o.departmentName, workflowName: o.workflowName, agent: o.agent,
+    score: o.score.total, confidence: o.score.confidence.level, solution: o.answers.recommendedSolution.name, overlapRemoved: o.line.overlap?.realizableRemoved ?? 0,
+    inScope: o.inScope, quadrant: o.quadrant, valueScore: o.valueScore, effortScore: o.effortScore, roi1y: o.line.roi1y, annualHoursSaved: o.answers.annualHoursSaved,
+  }));
+
+  // KPI drill-downs: aggregations of finance-engine lines (no new formulas).
+  const scoped = a.filtered.filter((o) => o.inScope);
+  const total = scoped.reduce((s, o) => s + o.line.realizableAnnualSavings, 0);
+  const totalTree: CalcTree = { label: "Total potential (realizable, filtered)", value: total, unit: "usd", basis: "estimated", formula: `Σ realizable savings of ${scoped.length} in-scope opportunit${scoped.length === 1 ? "y" : "ies"} after overlap de-duplication`, source: "Finance engine (computeOrgFinancials)", children: scoped.slice(0, 25).map((o) => ({ label: o.title, value: o.line.realizableAnnualSavings, unit: "usd", basis: "estimated" as const, children: [o.line.tree] })) };
+  const high = a.filtered.filter((o) => o.score.confidence.level === "High");
+  const highTree: CalcTree = { label: "High-confidence opportunities", value: high.length, basis: "observed", formula: a.filtered[0]?.score.confidence.rule ?? "", children: a.filtered.map((o) => ({ label: `${o.title} — ${o.score.confidence.level}`, value: o.evidence.sampleSize, unit: "runs", basis: o.basis, source: o.score.confidence.reasons.join(" · ") })) };
+  const withPayback = scoped.filter((o) => o.line.paybackMonths != null).sort((x, y) => (x.line.paybackMonths ?? 0) - (y.line.paybackMonths ?? 0));
+  const top = withPayback[0];
+  const paybackTree: CalcTree | null = top ? { label: `Fastest payback: ${top.title}`, value: top.line.paybackMonths ?? 0, unit: "months", basis: "estimated", formula: "implementation ÷ (net annual ÷ 12)", children: [
+    { label: "Implementation cost (one-time)", value: top.line.implementationCost, unit: "usd", basis: "estimated" },
+    { label: "Net annual savings", value: top.line.netAnnualSavings, unit: "usd", basis: "estimated", formula: "realizable − operating" },
+  ] } : null;
+  const overlapped = scoped.filter((o) => (o.line.overlap?.realizableRemoved ?? 0) > 0);
+  const overlap = overlapped.reduce((s, o) => s + (o.line.overlap?.realizableRemoved ?? 0), 0);
+  const overlapTree: CalcTree = { label: "Overlap removed", value: overlap, unit: "usd", basis: "estimated", formula: "Σ realizable removed where several opportunities target the same workflow (capped at 90% of its observed hours)", children: overlapped.map((o) => ({ label: o.title, value: o.line.overlap!.realizableRemoved, unit: "usd", basis: "estimated" as const, formula: `scaled × ${o.line.overlap!.factor.toFixed(3)}` })) };
+
+  const kpis: CenterKpis = { total, totalTree, highConfidence: high.length, highTree, topPayback: top ? { months: top.line.paybackMonths ?? 0, title: top.title, id: top.id } : null, paybackTree, overlap, overlapTree, inScope: scoped.length };
+  const deptName = new Map(a.options.departments.map((d) => [d.id, d.name]));
+  const filterDefs = [
+    { key: "dept", label: "Department", options: a.options.departments.map((d) => ({ value: d.id, label: d.name })) },
+    { key: "bu", label: "Business unit", options: a.options.businessUnits.map((d) => ({ value: d.id, label: d.name })) },
+    { key: "loc", label: "Location", options: a.options.locations.map((d) => ({ value: d.id, label: d.name })) },
+    { key: "status", label: "Status", options: STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })) },
+    { key: "risk", label: "Risk", options: [{ value: "low", label: "Low risk (< 35)" }, { value: "medium", label: "Medium risk (35–59)" }, { value: "high", label: "High risk (≥ 60)" }] },
+    { key: "type", label: "Type", options: Object.entries(OPP_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
+  ];
+  return (
+    <OpportunityCenter rows={rows} totalCount={a.all.length} kpis={kpis} filterDefs={filterDefs} splits={a.splits}
+      departments={[...new Set(rows.map((r) => r.departmentId ?? ""))].map((id) => ({ id, name: id ? (deptName.get(id) ?? "Unknown") : "Unassigned" }))}
+      canWrite={can(ctx.role, "opportunities:write")} canAutomate={can(ctx.role, "agents:write")} />
+  );
 }

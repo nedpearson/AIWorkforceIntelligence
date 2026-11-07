@@ -13,6 +13,7 @@ import { validateDefinition } from "@/engine/agents/definition";
 import { startRun, resumeRun, type RunResult } from "@/engine/agents/runner";
 import { checkConnection, pushWorkflow, pullExecutionsIntoRunLedger, triggerViaWebhook } from "@/engine/agents/n8n";
 import { measureAgent } from "@/engine/agents/measure";
+import { recordVersionTx, rollbackToVersion } from "@/engine/agents/versions";
 import type { ApprovalPolicy, AgentDefinition } from "@/db/schema";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -51,6 +52,7 @@ export async function createAgent(raw: unknown): Promise<Result<{ id: string }>>
         orgId: ctx.orgId, opportunityId: d.opportunityId ?? null, workflowId, name: d.name, category: t.category, templateKey: t.key, status: "configured", runtime: d.runtime,
         definition, credentialIds: d.credentialIds, approvalPolicy: d.approvalPolicy as ApprovalPolicy, expectedMinutesSavedPerRun: String(t.expectedMinutesSavedPerRun), baselineMinutesPerRun: String(t.baselineMinutesPerRun), monthlyCost: String(t.monthlyCost), createdBy: ctx.userId,
       }).returning({ id: schema.agents.id });
+      await recordVersionTx(tx, { orgId: ctx.orgId, agentId: row.id, definition, approvalPolicy: d.approvalPolicy as ApprovalPolicy, note: `created from template ${t.key}`, createdBy: ctx.userId });
       if (d.opportunityId) await tx.update(schema.opportunities).set({ agentId: row.id, status: "in_progress", updatedAt: new Date() }).where(and(eq(schema.opportunities.id, d.opportunityId), eq(schema.opportunities.orgId, ctx.orgId)));
       return row.id;
     });
@@ -59,15 +61,45 @@ export async function createAgent(raw: unknown): Promise<Result<{ id: string }>>
   } catch (e) { return fail(msg(e)); }
 }
 
-const UpdateDefinitionInput = z.object({ agentId: uuid, definition: z.unknown() });
-export async function updateAgentDefinition(raw: unknown): Promise<Result> {
+const UpdateDefinitionInput = z.object({ agentId: uuid, definition: z.unknown(), note: z.string().max(300).optional() });
+export async function updateAgentDefinition(raw: unknown): Promise<Result<{ version: number }>> {
   const ctx = await requireCtx("agents:write");
   const p = UpdateDefinitionInput.safeParse(raw); if (!p.success) return fail("invalid input");
   const v = validateDefinition(p.data.definition); if (!v.ok) return fail(v.errors.slice(0, 3).join("; "));
-  const n = await withTenant(ctx.orgId, (tx) => tx.update(schema.agents).set({ definition: v.definition, updatedAt: new Date() }).where(and(eq(schema.agents.id, p.data.agentId), eq(schema.agents.orgId, ctx.orgId))).returning({ id: schema.agents.id }));
-  if (!n.length) return fail("agent not found");
-  await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "agent.definition.updated", entityType: "agent", entityId: p.data.agentId, details: { nodes: v.definition.nodes.length, edges: v.definition.edges.length } });
-  revalidate(p.data.agentId); return { ok: true };
+  let version: number | null;
+  try { version = await withTenant(ctx.orgId, async (tx) => {
+    const [cur] = await tx.select({ definition: schema.agents.definition, approvalPolicy: schema.agents.approvalPolicy, status: schema.agents.status }).from(schema.agents).where(and(eq(schema.agents.id, p.data.agentId), eq(schema.agents.orgId, ctx.orgId))).limit(1);
+    if (!cur) return null;
+    if (cur.status === "retired") throw new Error("agent is retired");
+    await tx.update(schema.agents).set({ definition: v.definition, updatedAt: new Date() }).where(and(eq(schema.agents.id, p.data.agentId), eq(schema.agents.orgId, ctx.orgId)));
+    return recordVersionTx(tx, { orgId: ctx.orgId, agentId: p.data.agentId, definition: v.definition, approvalPolicy: cur.approvalPolicy, note: p.data.note?.trim() || "definition saved", createdBy: ctx.userId, previous: { definition: cur.definition, approvalPolicy: cur.approvalPolicy } });
+  }); } catch (e) { return fail(msg(e)); }
+  if (version == null) return fail("agent not found");
+  await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "agent.definition.updated", entityType: "agent", entityId: p.data.agentId, details: { nodes: v.definition.nodes.length, edges: v.definition.edges.length, version } });
+  revalidate(p.data.agentId); return { ok: true, version };
+}
+
+const RollbackInput = z.object({ agentId: uuid, version: z.number().int().min(1) });
+export async function rollbackAgentVersion(raw: unknown): Promise<Result<{ version: number }>> {
+  const ctx = await requireCtx("agents:write");
+  const p = RollbackInput.safeParse(raw); if (!p.success) return fail("invalid input");
+  try {
+    const r = await rollbackToVersion(ctx.orgId, p.data.agentId, p.data.version, ctx.userId); // audited inside
+    revalidate(p.data.agentId); return { ok: true, version: r.newVersion };
+  } catch (e) { return fail(msg(e)); }
+}
+
+const TestRunInput = z.object({ agentId: uuid, input: z.record(z.string(), z.unknown()).default({}) });
+/** Dry run in the test environment: no external calls, approvals auto-approve, excluded from every savings number. */
+export async function testRunAgent(raw: unknown): Promise<Result<{ run: RunResult }>> {
+  const ctx = await requireCtx("agents:write");
+  const p = TestRunInput.safeParse(raw); if (!p.success) return fail("input must be a JSON object");
+  try {
+    const [agent] = await withTenant(ctx.orgId, (tx) => tx.select({ id: schema.agents.id }).from(schema.agents).where(and(eq(schema.agents.id, p.data.agentId), eq(schema.agents.orgId, ctx.orgId))).limit(1));
+    if (!agent) return fail("agent not found");
+    const run = await startRun({ orgId: ctx.orgId, agentId: agent.id, input: p.data.input, actorUserId: ctx.userId, dryRun: true });
+    revalidate(agent.id); revalidatePath("/app/automation"); return { ok: true, run };
+  } catch (e) { return fail(msg(e)); }
 }
 
 const UpdateSettingsInput = z.object({ agentId: uuid, name: z.string().min(2).max(120).optional(), credentialIds: z.array(uuid).max(20).optional(), approvalPolicy: ApprovalPolicySchema.optional(), runtime: z.enum(["internal", "n8n"]).optional() });
@@ -75,8 +107,16 @@ export async function updateAgentSettings(raw: unknown): Promise<Result> {
   const ctx = await requireCtx("agents:write");
   const p = UpdateSettingsInput.safeParse(raw); if (!p.success) return fail(p.error.issues[0]?.message ?? "invalid");
   const { agentId, ...patch } = p.data;
-  const n = await withTenant(ctx.orgId, (tx) => tx.update(schema.agents).set({ ...patch, approvalPolicy: patch.approvalPolicy as ApprovalPolicy | undefined, updatedAt: new Date() }).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, ctx.orgId))).returning({ id: schema.agents.id }));
-  if (!n.length) return fail("agent not found");
+  const n = await withTenant(ctx.orgId, async (tx) => {
+    const [cur] = await tx.select({ definition: schema.agents.definition, approvalPolicy: schema.agents.approvalPolicy }).from(schema.agents).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, ctx.orgId))).limit(1);
+    if (!cur) return 0;
+    await tx.update(schema.agents).set({ ...patch, approvalPolicy: patch.approvalPolicy as ApprovalPolicy | undefined, updatedAt: new Date() }).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, ctx.orgId)));
+    // The approval policy is part of what a version restores, so a policy change is versioned too.
+    if (patch.approvalPolicy && JSON.stringify(patch.approvalPolicy) !== JSON.stringify(cur.approvalPolicy ?? null))
+      await recordVersionTx(tx, { orgId: ctx.orgId, agentId, definition: cur.definition, approvalPolicy: patch.approvalPolicy as ApprovalPolicy, note: `approval policy → ${patch.approvalPolicy.mode}`, createdBy: ctx.userId, previous: { definition: cur.definition, approvalPolicy: cur.approvalPolicy } });
+    return 1;
+  });
+  if (!n) return fail("agent not found");
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "agent.settings.updated", entityType: "agent", entityId: agentId, details: patch });
   revalidate(agentId); return { ok: true };
 }
@@ -87,9 +127,10 @@ export async function setAgentStatus(raw: unknown): Promise<Result> {
   const p = StatusInput.safeParse(raw); if (!p.success) return fail("invalid input");
   const { agentId, status } = p.data;
   const n = await withTenant(ctx.orgId, async (tx) => {
-    const [cur] = await tx.select({ deployedAt: schema.agents.deployedAt, opportunityId: schema.agents.opportunityId }).from(schema.agents).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, ctx.orgId))).limit(1);
+    const [cur] = await tx.select({ deployedAt: schema.agents.deployedAt, opportunityId: schema.agents.opportunityId, definition: schema.agents.definition, approvalPolicy: schema.agents.approvalPolicy }).from(schema.agents).where(and(eq(schema.agents.id, agentId), eq(schema.agents.orgId, ctx.orgId))).limit(1);
     if (!cur) return 0;
     await tx.update(schema.agents).set({ status, deployedAt: status === "deployed" ? (cur.deployedAt ?? new Date()) : cur.deployedAt, updatedAt: new Date() }).where(eq(schema.agents.id, agentId));
+    if (status === "deployed") await recordVersionTx(tx, { orgId: ctx.orgId, agentId, definition: cur.definition, approvalPolicy: cur.approvalPolicy, note: "deployed", createdBy: ctx.userId, previous: { definition: cur.definition, approvalPolicy: cur.approvalPolicy } });
     if (cur.opportunityId && status === "deployed") await tx.update(schema.opportunities).set({ status: "deployed", updatedAt: new Date() }).where(and(eq(schema.opportunities.id, cur.opportunityId), eq(schema.opportunities.orgId, ctx.orgId)));
     return 1;
   });

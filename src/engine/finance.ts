@@ -80,6 +80,7 @@ type Loaded = {
   measurements: (typeof schema.savingsMeasurements.$inferSelect)[];
   employeesWithEvents: Set<string>;
   activeHoursPerWeek: number; // total non-idle observed time ÷ observed weeks (activity_events)
+  activeHoursByEmployee: Map<string, number>; // same, per employee
 };
 
 async function loadOrg(tx: TenantDb, orgId: string): Promise<Loaded> {
@@ -101,7 +102,9 @@ async function loadOrg(tx: TenantDb, orgId: string): Promise<Loaded> {
   const [act] = await tx.execute(sql`select coalesce(sum(duration_ms),0)::float8 as ms, count(distinct date(ts)) as days from activity_events where org_id = ${orgId} and type not in ('idle_start','idle_end')`) as unknown as { ms: number; days: number }[];
   const activeDays = Number(act?.days ?? 0); const weeks = activeDays > 0 ? Math.max(activeDays / 5, 0.2) : 0;
   const activeHoursPerWeek = weeks > 0 ? Number(act.ms) / 3_600_000 / weeks : 0;
-  return { org, model, departments, employees, workflows, workflowEmployees, opportunities, agents, measurements, employeesWithEvents: new Set(eventEmps.map((e) => e.employeeId)), activeHoursPerWeek };
+  const perEmp = await tx.execute(sql`select employee_id as id, coalesce(sum(duration_ms),0)::float8 as ms from activity_events where org_id = ${orgId} and type not in ('idle_start','idle_end') group by employee_id`) as unknown as { id: string; ms: number }[];
+  const activeHoursByEmployee = new Map(perEmp.map((r) => [r.id, weeks > 0 ? Number(r.ms) / 3_600_000 / weeks : 0]));
+  return { org, model, departments, employees, workflows, workflowEmployees, opportunities, agents, measurements, employeesWithEvents: new Set(eventEmps.map((e) => e.employeeId)), activeHoursPerWeek, activeHoursByEmployee };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -374,7 +377,7 @@ export async function computeOrgFinancials(orgId: string, overrides: FinancialOv
   };
   for (const e of analyzed) {
     const r = deptOf(e.departmentId ?? null); r.employees += 1; r.laborAnnual += empLabor.get(e.id)?.annual ?? 0;
-    r.hoursPerWeek += empHours.get(e.id) ?? 0; r.repetitiveHoursPerWeek += empRepHours.get(e.id) ?? 0;
+    r.hoursPerWeek += Math.max(d.activeHoursByEmployee.get(e.id) ?? 0, empHours.get(e.id) ?? 0); r.repetitiveHoursPerWeek += empRepHours.get(e.id) ?? 0;
   }
   const lineById = new Map(main.lines.map((l) => [l.id, l]));
   for (const l of main.lines) {
@@ -399,7 +402,7 @@ export async function computeOrgFinancials(orgId: string, overrides: FinancialOv
       const tot = wfHoursTotal.get(l.workflowId) ?? 0; const share = tot > 0 ? num(l.hoursPerWeek) / tot : 0;
       for (const line of linesByWf.get(l.workflowId) ?? []) { recoverable += line.hoursRecoverablePerWeek * share; realizable += line.realizableAnnualSavings * share; }
     }
-    const hours = empHours.get(e.id) ?? 0; const lab = empLabor.get(e.id)!;
+    const hours = Math.max(d.activeHoursByEmployee.get(e.id) ?? 0, empHours.get(e.id) ?? 0); const lab = empLabor.get(e.id)!;
     return {
       employeeId: e.id, name: e.displayName, title: e.title ?? null, departmentId: e.departmentId ?? null, departmentName: e.departmentId ? (deptById.get(e.departmentId)?.name ?? null) : null,
       laborAnnual: lab.annual, loadedHourly: lab.hourly, costBasis: lab.basis, hoursPerWeek: hours, repetitiveHoursPerWeek: empRepHours.get(e.id) ?? 0,
@@ -458,6 +461,7 @@ export async function recordSavingsFromRunLedger(orgId: string, agentId: string,
 
     const runs = await tx.select().from(schema.agentRuns).where(and(
       eq(schema.agentRuns.orgId, orgId), eq(schema.agentRuns.agentId, agentId), eq(schema.agentRuns.status, "succeeded"),
+      sql`${schema.agentRuns.trigger} <> 'test'`, // dry runs (test environment) never count as savings
       sql`coalesce(${schema.agentRuns.finishedAt}, ${schema.agentRuns.startedAt}, ${schema.agentRuns.createdAt}) >= ${periodStart.toISOString()}::timestamptz`,
       sql`coalesce(${schema.agentRuns.finishedAt}, ${schema.agentRuns.startedAt}, ${schema.agentRuns.createdAt}) < ${periodEnd.toISOString()}::timestamptz`,
     ));

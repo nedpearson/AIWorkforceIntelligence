@@ -1,50 +1,49 @@
+import { and, desc, eq } from "drizzle-orm";
+import { ShieldCheck } from "lucide-react";
 import { requireCtx } from "@/lib/session";
 import { can } from "@/lib/rbac";
-import { computeOrgFinancials } from "@/engine/finance";
-import type { CalcTree } from "@/db/schema";
-import type { OpportunityLine } from "@/engine/finance.types";
-import { ExecutiveSummary, type ExecData } from "@/components/dashboard/executive-summary";
-import { loadProgress, checklist } from "./onboarding/progress";
+import { withTenant } from "@/db/tenant";
+import { schema } from "@/db/client";
+import { Button, Empty } from "@/components/ui";
+import { computeExecutiveModel, computePortfolio, resolveDepartmentFilter, sanitizeOverrides } from "@/engine/exports";
+import { CommandCenter } from "@/components/command/command-center";
+import { PortfolioCommandCenter } from "@/components/command/portfolio";
 
-export const metadata = { title: "Executive Summary" };
+export const metadata = { title: "Executive Command Center" };
 export const dynamic = "force-dynamic";
 
-function findNode(tree: CalcTree | undefined, label: string): CalcTree | undefined {
-  if (!tree) return undefined; if (tree.label === label) return tree;
-  for (const c of tree.children ?? []) { const f = findNode(c, label); if (f) return f; }
-  return undefined;
-}
+type SP = { scenario?: string; period?: string; from?: string; to?: string; bu?: string; dept?: string; loc?: string; view?: string };
+const DAY = 86_400_000;
 
-/**
- * "Spent on automatable work today": gross annual labor on every workflow that has an (non-rejected) opportunity.
- * = Σ opportunity (observed workflow hrs/wk × working weeks/yr × avg loaded hourly of the people doing it).
- * Inputs are read off each opportunity's CalcTree from computeOrgFinancials so the numbers match the finance engine exactly.
- */
-function wastedLabor(lines: OpportunityLine[], weeks: number): { value: number; tree: CalcTree } {
-  const seen = new Set<string>(); const children: CalcTree[] = []; let total = 0;
-  for (const l of lines) {
-    const key = l.workflowId ?? l.id; if (seen.has(key)) continue; seen.add(key); // one workflow counted once even if several opportunities point at it
-    const hourly = findNode(l.tree, "Average loaded hourly cost")?.value ?? 0;
-    const hoursNode = findNode(l.tree, "Observed workflow hours per week");
-    const annual = l.hoursPerWeek * weeks * hourly; total += annual;
-    children.push({ label: l.workflowName ?? l.title, value: annual, unit: "usd", basis: "estimated", formula: `${l.hoursPerWeek.toFixed(1)} hrs/wk × ${weeks} wk × $${hourly.toFixed(2)}/hr`, source: `Opportunity ${l.title}`, children: [
-      { label: "Observed workflow hours per week", value: l.hoursPerWeek, unit: "hours", basis: hoursNode?.basis ?? "observed", source: "Collector events (sum of step durations)" },
-      { label: "Working weeks per year", value: weeks, unit: "weeks", basis: "assumed" },
-      { label: "Average loaded hourly cost", value: hourly, unit: "usd", basis: "estimated", source: "Hours-weighted across the people performing it" },
-    ] });
-  }
-  return { value: total, tree: { label: "Spent on automatable work today (annual)", value: total, unit: "usd", basis: "estimated", formula: "Σ workflows with an opportunity: hrs/wk × weeks/yr × avg loaded hourly", source: `${children.length} automatable workflow(s); the size of the prize, before any automation`, children } };
-}
-
-export default async function ExecutivePage() {
+export default async function CommandCenterPage({ searchParams }: { searchParams: Promise<SP> }) {
   const ctx = await requireCtx();
-  const [fin, progress] = await Promise.all([computeOrgFinancials(ctx.orgId), loadProgress(ctx.orgId)]);
-  const { byEmployee: _drop, ...finNoEmp } = fin; void _drop; // per-person $ never leaves the server on this page
-  const data: ExecData = {
-    fin: finNoEmp,
-    wasted: wastedLabor(fin.opportunities, fin.assumptions.workWeeksPerYear),
-    progress, steps: checklist(progress), role: ctx.role,
-    canWriteAgents: can(ctx.role, "agents:write"), canManageCollection: can(ctx.role, "collectors:manage"),
-  };
-  return <ExecutiveSummary data={data} />;
+  if (!can(ctx.role, "finance:read")) {
+    return <Empty title="Your workspace" body="The executive command center shows organization-wide financial figures, which your role does not include. You can review exactly what is collected about your own work on the Trust & Privacy page." action={<Button href="/app/trust" data-testid="cmd-trust"><ShieldCheck size={15} />Trust & Privacy</Button>} />;
+  }
+  if (ctx.orgKind === "consultancy") {
+    const portfolio = await computePortfolio(ctx.orgId, 25);
+    return <PortfolioCommandCenter portfolio={portfolio} orgName={ctx.orgName} />;
+  }
+
+  const sp = await searchParams;
+  const period = sp.period === "30" || sp.period === "90" ? sp.period : "365";
+  const to = sp.to && /^\d{4}-\d{2}-\d{2}$/.test(sp.to) ? new Date(sp.to + "T23:59:59Z") : new Date();
+  const from = sp.from && /^\d{4}-\d{2}-\d{2}$/.test(sp.from) ? new Date(sp.from + "T00:00:00Z") : new Date(to.getTime() - Number(period) * DAY);
+  const overrides = sanitizeOverrides({ scenario: sp.scenario, periodStart: from < to ? from : new Date(to.getTime() - Number(period) * DAY), periodEnd: to });
+
+  const [model, rows] = await Promise.all([
+    computeExecutiveModel(ctx.orgId, overrides),
+    withTenant(ctx.orgId, (tx) => tx.select().from(schema.dashboardViews).where(and(eq(schema.dashboardViews.orgId, ctx.orgId), eq(schema.dashboardViews.userId, ctx.userId), eq(schema.dashboardViews.page, "command"))).orderBy(desc(schema.dashboardViews.createdAt))),
+  ]);
+  const def = rows.find((r) => r.isDefault);
+  const active = sp.view ? rows.find((r) => r.id === sp.view && !r.isDefault) : undefined;
+  const layoutSrc = active?.layout?.order?.length ? active.layout : def?.layout;
+  const layout = { hidden: layoutSrc?.hidden ?? [], order: layoutSrc?.order ?? [] };
+  const deptFilter = resolveDepartmentFilter(model, { bu: sp.bu, dept: sp.dept, loc: sp.loc });
+
+  return (
+    <CommandCenter model={model} deptFilter={deptFilter ? [...deptFilter] : null} period={period} layout={layout}
+      views={rows.filter((r) => !r.isDefault).map((r) => ({ id: r.id, name: r.name, filters: r.filters }))} activeViewId={active?.id ?? null}
+      perms={{ canPdf: can(ctx.role, "reports:generate"), canWriteAgents: can(ctx.role, "agents:write") }} />
+  );
 }

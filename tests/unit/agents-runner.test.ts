@@ -9,7 +9,9 @@ import { createServer, type Server } from "node:http";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { encrypt } from "@/lib/crypto";
-import { AGENT_TEMPLATES, getTemplate, recommendTemplate } from "@/engine/agents/templates";
+import { AGENT_TEMPLATES, AGENT_CATEGORIES, BUSINESS_FUNCTIONS, getTemplate, recommendTemplate, agentFunction } from "@/engine/agents/templates";
+import { recordSavingsFromRunLedger } from "@/engine/finance";
+import { computeAgentPortfolio } from "@/engine/agents/portfolio";
 import { validateDefinition } from "@/engine/agents/definition";
 import { startRun, resumeRun, compare } from "@/engine/agents/runner";
 import { measureAgent, beforeAfterComparison, runLedgerSummary } from "@/engine/agents/measure";
@@ -58,10 +60,17 @@ async function makeAgent(orgId: string, def: AgentDefinition, extra: Partial<typ
 const run = (id: string) => db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, id)).then((r) => r[0]);
 
 describe("templates", () => {
-  it("ships 12 valid templates, one per category, with realistic graphs", () => {
-    expect(AGENT_TEMPLATES).toHaveLength(12);
-    expect(new Set(AGENT_TEMPLATES.map((t) => t.category)).size).toBe(12);
+  it("ships valid templates covering every category and every business-function use case, with realistic graphs", () => {
+    expect(AGENT_TEMPLATES.length).toBeGreaterThanOrEqual(39);
+    expect(new Set(AGENT_TEMPLATES.map((t) => t.key)).size).toBe(AGENT_TEMPLATES.length);
+    expect(new Set(AGENT_TEMPLATES.map((t) => t.category))).toEqual(new Set(AGENT_CATEGORIES));
+    for (const f of BUSINESS_FUNCTIONS) for (const u of f.useCases) expect(AGENT_TEMPLATES.some((t) => t.fn === f.key && t.useCase === u), `${f.label} / ${u}`).toBe(true);
     for (const t of AGENT_TEMPLATES) {
+      expect(BUSINESS_FUNCTIONS.find((f) => f.key === t.fn)?.useCases, t.key).toContain(t.useCase);
+      expect(t.requiredCredentials.length, `${t.key} declares credentials`).toBeGreaterThan(0);
+      expect(t.requiredCredentials.filter((c) => c.provider === "http_bearer").length, `${t.key}: at most one http_bearer`).toBeLessThanOrEqual(1);
+      // a gate exists wherever the template is customer-facing or moves money: every approval is sensitive
+      for (const ap of t.definition.nodes.filter((x) => x.type === "approval")) expect(ap.sensitive).toBe(true);
       const v = validateDefinition(t.definition);
       expect(v.ok, `${t.key}: ${!v.ok ? v.errors.join("; ") : ""}`).toBe(true);
       expect(t.description.length).toBeGreaterThan(80);
@@ -70,7 +79,14 @@ describe("templates", () => {
       const actions = t.definition.nodes.filter((n) => n.type === "action");
       // every template that changes an external system declares how to undo it
       if (actions.length) expect(actions.some((a) => a.compensate), `${t.key} has a compensable action`).toBe(true);
+      // library templates: EVERY external write declares its undo
+      if (!["customer_service_reply_drafting", "scheduling_appointment_coordinator", "sales_crm_lead_enrichment", "email_admin_triage", "ap_ar_invoice_intake", "invoice_generation", "reporting_weekly_digest", "inventory_reorder", "marketing_social_drafts", "onboarding_new_hire", "document_summarizer", "data_entry_form_to_system"].includes(t.key))
+        for (const a of actions) expect(a.compensate, `${t.key}.${a.id} compensate`).toBeTruthy();
     }
+    // originals stay first, so category → template recommendations are unchanged
+    expect(AGENT_TEMPLATES.slice(0, 12).map((t) => t.category)).toEqual(["customer_service", "scheduling", "sales_crm", "email_admin", "ap_ar", "invoice", "reporting", "inventory", "marketing", "onboarding", "document", "data_entry"]);
+    expect(agentFunction({ templateKey: "sales_meeting_scheduler", category: "scheduling" })).toBe("sales");
+    expect(agentFunction({ templateKey: "unknown", category: "scheduling" })).toBe("operations");
     const n8n = AGENT_TEMPLATES.filter((t) => t.n8nWorkflowJson);
     expect(n8n.map((t) => t.category).sort()).toEqual(["ap_ar", "customer_service", "reporting", "scheduling"]);
     for (const t of n8n) { expect(t.n8nWorkflowJson!.nodes.length).toBeGreaterThan(2); expect(Object.keys(t.n8nWorkflowJson!.connections).length).toBeGreaterThan(1); }
@@ -254,5 +270,101 @@ describe("measurement", () => {
     expect(tree.unit).toBe("hours"); expect(tree.children).toHaveLength(3); expect(tree.basis).toBe("assumed"); // no events → honest basis
     await expect(measureAgent(ids.orgA, ag.id, { start: period.end, end: period.start }, { recordSavingsFromRunLedger: async () => null })).rejects.toThrow(/period/);
     await expect(beforeAfterComparison(ids.orgB, wf.id, new Date())).rejects.toThrow(/workflow not found/);
+  });
+});
+
+describe("dry run (test environment)", () => {
+  it("never calls out: http / action / notify webhook / compensation log the redacted request; approvals auto-approve; no minutes", async () => {
+    const def: AgentDefinition = { retries: { max: 0, backoffMs: 0 }, nodes: [
+      { id: "trigger", type: "trigger", label: "t", config: {} },
+      { id: "read", type: "http", label: "Read", config: { method: "GET", url: "{{secret.baseUrl}}/records?q={{input.q}}", auth: "bearer", credentialId: ids.credA } },
+      { id: "gate", type: "approval", label: "Gate", config: { action: "Create {{input.q}}", reviewMinutes: 5 }, sensitive: true },
+      { id: "create", type: "action", label: "Create", config: { kind: "http", method: "POST", url: "{{secret.baseUrl}}/records", auth: "bearer", credentialId: ids.credA, body: { q: "{{input.q}}", token: "{{secret.token}}" } }, compensate: { kind: "http", method: "DELETE", url: "{{secret.baseUrl}}/records/x", auth: "bearer", credentialId: ids.credA } },
+      { id: "hook", type: "notify", label: "Hook", config: { message: "done {{input.q}}", webhookUrl: `${base}/hook` } },
+      { id: "llm", type: "llm", label: "Draft", config: { prompt: "hi" } },
+      { id: "nocred", type: "http", label: "Provider without credential", config: { method: "GET", url: "{{secret.baseUrl}}/x", auth: "bearer", tokenField: "token", credentialProvider: "hubspot" } },
+      { id: "end", type: "end", label: "e", config: {} },
+    ], edges: [{ from: "trigger", to: "read" }, { from: "read", to: "gate" }, { from: "gate", to: "create", when: "approved" }, { from: "create", to: "hook" }, { from: "hook", to: "llm" }, { from: "llm", to: "nocred" }, { from: "nocred", to: "end" }] };
+    const ag = await makeAgent(ids.orgA, def, { approvalPolicy: { mode: "all" }, lastRunAt: null });
+    const [credBefore] = await db.select({ lastUsedAt: schema.credentials.lastUsedAt }).from(schema.credentials).where(eq(schema.credentials.id, ids.credA));
+    received.length = 0;
+    const r = await startRun({ orgId: ids.orgA, agentId: ag.id, input: { q: "abc" }, dryRun: true, trigger: "manual" });
+    expect(r).toMatchObject({ status: "succeeded", dryRun: true, minutesSaved: null });
+    expect(received).toHaveLength(0); // zero hits on the local server
+    const row = await run(r.runId);
+    expect(row.trigger).toBe("test"); expect(row.minutesSaved).toBeNull(); expect(row.humanMinutes).toBeNull();
+    const nodes = (row.output as { nodes: Record<string, Record<string, unknown>> }).nodes;
+    expect(nodes.read).toMatchObject({ dryRun: true, status: null, request: { method: "GET", url: "[redacted]/records?q=abc", headers: { authorization: "Bearer [redacted]" } } }); // every credential value (incl. baseUrl) is redacted
+    expect(nodes.create.request).toMatchObject({ method: "POST", body: { q: "abc", token: "[redacted]" } });
+    expect(nodes.gate).toMatchObject({ dryRun: true, autoApproved: true, requestedAction: "Create abc" });
+    expect(nodes.hook).toMatchObject({ dryRun: true, wouldDeliver: ["webhook"], delivered: [] });
+    expect(nodes.llm).toMatchObject({ skipped: "ANTHROPIC_API_KEY not configured" });
+    expect(nodes.nocred).toMatchObject({ dryRun: true, request: { url: "[secret.baseUrl]/x" } });
+    expect(nodes.end).toEqual({ dryRun: true, minutesSaved: null });
+    const logs = row.logs as { msg: string; nodeId?: string; data?: Record<string, unknown> }[];
+    expect(logs[0].msg).toMatch(/Dry run \(test environment\)/);
+    expect(logs.some((l) => l.nodeId === "create" && l.msg === "Dry run: would send POST [redacted]/records")).toBe(true);
+    expect(logs.some((l) => l.nodeId === "gate" && /auto-approved/.test(l.msg))).toBe(true);
+    expect(logs.some((l) => /no hubspot credential attached/.test(l.msg))).toBe(true);
+    expect(JSON.stringify({ logs: row.logs, output: row.output })).not.toContain(SECRET_A);
+    expect(await db.select().from(schema.approvals).where(eq(schema.approvals.runId, r.runId))).toHaveLength(0);
+    const [agAfter] = await db.select().from(schema.agents).where(eq(schema.agents.id, ag.id));
+    expect(agAfter.lastRunAt).toBeNull(); // test runs are not "last execution"
+    const [credAfter] = await db.select({ lastUsedAt: schema.credentials.lastUsedAt }).from(schema.credentials).where(eq(schema.credentials.id, ids.credA));
+    expect(credAfter.lastUsedAt?.getTime()).toBe(credBefore.lastUsedAt?.getTime());
+  });
+
+  it("a live run cannot be labelled 'test' by its caller", async () => {
+    const def: AgentDefinition = { nodes: [{ id: "trigger", type: "trigger", label: "t", config: {} }, { id: "end", type: "end", label: "e", config: {} }], edges: [{ from: "trigger", to: "end" }] };
+    const ag = await makeAgent(ids.orgA, def);
+    const r = await startRun({ orgId: ids.orgA, agentId: ag.id, trigger: "test" });
+    expect((await run(r.runId)).trigger).toBe("manual"); expect(r.minutesSaved).toBe(7.5);
+  });
+
+  it("test runs are excluded from run-ledger savings (finance), ledger summary and the agent portfolio; portfolio valuation = finance valuation", async () => {
+    const def: AgentDefinition = { nodes: [{ id: "trigger", type: "trigger", label: "t", config: {} }, { id: "end", type: "end", label: "e", config: {} }], edges: [{ from: "trigger", to: "end" }] };
+    const [dept] = await db.insert(schema.departments).values({ orgId: ids.orgA, name: "AP" }).returning();
+    const [e1] = await db.insert(schema.employees).values({ orgId: ids.orgA, departmentId: dept.id, displayName: "P1", baseAnnualCost: "62400", costBasis: "observed", hoursPerWeek: "40" }).returning();
+    const [e2] = await db.insert(schema.employees).values({ orgId: ids.orgA, departmentId: dept.id, displayName: "P2", loadedHourlyCost: "50", costBasis: "estimated" }).returning();
+    const [wf] = await db.insert(schema.workflows).values({ orgId: ids.orgA, name: "Valued WF", signature: "v>w", hoursPerWeek: "4", basis: "observed" }).returning();
+    await db.insert(schema.workflowEmployees).values([{ orgId: ids.orgA, workflowId: wf.id, employeeId: e1.id, hoursPerWeek: "3" }, { orgId: ids.orgA, workflowId: wf.id, employeeId: e2.id, hoursPerWeek: "1" }]);
+    const ag = await makeAgent(ids.orgA, def, { workflowId: wf.id, monthlyCost: "100", expectedMinutesSavedPerRun: "12" });
+    await startRun({ orgId: ids.orgA, agentId: ag.id }); await startRun({ orgId: ids.orgA, agentId: ag.id });
+    for (let i = 0; i < 3; i++) await startRun({ orgId: ids.orgA, agentId: ag.id, dryRun: true });
+    // even a test row that somehow carried minutes must be ignored
+    await db.insert(schema.agentRuns).values({ orgId: ids.orgA, agentId: ag.id, status: "succeeded", trigger: "test", minutesSaved: "999", finishedAt: new Date() });
+    const period = { start: new Date(Date.now() - 86400_000), end: new Date(Date.now() + 60_000) };
+    const m = await recordSavingsFromRunLedger(ids.orgA, ag.id, period.start, period.end);
+    expect(m.runs).toBe(2); expect(Number(m.hoursSaved)).toBeCloseTo(24 / 60, 5);
+    expect(await runLedgerSummary(ids.orgA, ag.id, period)).toMatchObject({ runs: 2, succeeded: 2, minutesSaved: 24 });
+    const pf = await computeAgentPortfolio(ids.orgA);
+    const a = pf.agents.find((x) => x.id === ag.id)!;
+    expect(a).toMatchObject({ runs: 2, succeeded: 2, tasksCompleted: 2, minutesSaved: 24, failed: 0 });
+    expect(a.lastTest?.status).toBe("succeeded");
+    // same loaded hourly + same dollars as the finance engine: (62400×1.3/(40×48)) weighted 3:1 with $50
+    const expectedHourly = ((62400 * 1.3) / (40 * 48) * 3 + 50 * 1) / 4;
+    expect(a.hourly).toBeCloseTo(expectedHourly, 6);
+    expect(a.benefit).toBeCloseTo(Number(m.dollarsSaved), 2);
+    expect(a.benefit).toBeCloseTo((24 / 60) * expectedHourly, 6);
+    expect(a.operatingCost).toBeCloseTo(100 * (30 / (365.25 / 12)), 6);
+    expect(a.netBenefit).toBeCloseTo(a.benefit - a.operatingCost, 6);
+    expect(a.trees.net.children?.[0].value).toBeCloseTo(a.benefit, 6);
+    expect(pf.kpis.executions).toBeGreaterThanOrEqual(2);
+  });
+
+  it("portfolio: failure alerts with consecutive failures, interventions, connected systems, schedule", async () => {
+    const def: AgentDefinition = { schedule: "0 7 * * 1", retries: { max: 0, backoffMs: 0 }, nodes: [{ id: "trigger", type: "trigger", label: "t", config: {} }, { id: "down", type: "http", label: "Down", config: { method: "GET", url: "{{secret.baseUrl}}/always-fail", credentialId: ids.credA } }, { id: "end", type: "end", label: "e", config: {} }], edges: [{ from: "trigger", to: "down" }, { from: "down", to: "end" }] };
+    const ag = await makeAgent(ids.orgA, def);
+    await startRun({ orgId: ids.orgA, agentId: ag.id }); await startRun({ orgId: ids.orgA, agentId: ag.id });
+    const pf = await computeAgentPortfolio(ids.orgA);
+    const a = pf.agents.find((x) => x.id === ag.id)!;
+    expect(a).toMatchObject({ failed: 2, consecutiveFailures: 2, failures7d: 2, successRate: 0, connectedSystems: ["http_bearer"] });
+    expect(a.lastError).toMatch(/HTTP 503/);
+    expect(a.schedule).toMatchObject({ cron: "0 7 * * 1", valid: true, description: "Every Mon at 07:00" });
+    expect(new Date(a.schedule!.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
+    const alert = pf.alerts.find((x) => x.agentId === ag.id)!;
+    expect(alert).toMatchObject({ consecutiveFailures: 2, failures7d: 2 }); expect(alert.lastFailedRunId).toBeTruthy();
+    // org B sees none of org A's agents
+    expect((await computeAgentPortfolio(ids.orgB)).agents.some((x) => x.id === ag.id)).toBe(false);
   });
 });
