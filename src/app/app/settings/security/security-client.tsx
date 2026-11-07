@@ -12,7 +12,7 @@ import { formatDateTime } from "@/lib/datetime";
 type Flash = { ok: boolean; text: string } | null;
 const date = (s: string | null, tz: string) => (s ? formatDateTime(s, tz, { dateStyle: "medium", timeStyle: "short" }) : "never");
 
-type Policy = { orgRequiresMfa: boolean; canEdit: boolean; required: boolean; reason: "org_policy" | "platform_owner" | null; gateHit: boolean };
+type Policy = { orgRequiresMfa: boolean; canEdit: boolean; required: boolean; reason: "org_policy" | "platform_owner" | "platform_owner_grace" | null; gateHit: boolean };
 /** After a password/MFA change or "sign out everywhere" the session version was bumped: this cookie is dead, so clear it. */
 const reauth = (why: string) => signOut({ callbackUrl: `/login?reauth=${why}` });
 

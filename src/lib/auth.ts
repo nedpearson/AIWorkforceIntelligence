@@ -60,4 +60,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
 export type Ctx = { userId: string; email: string; orgId: string; role: Role; orgKind: "consultancy" | "client"; orgName: string; employeeId: string | null;
   /** From users.mfa_enabled (DB, not the token) and src/lib/mfa-policy.ts. */
-  mfaEnabled?: boolean; mfaRequired?: boolean; mfaRequiredReason?: "org_policy" | "platform_owner" | null };
+  mfaEnabled?: boolean; mfaRequired?: boolean; mfaRequiredReason?: "org_policy" | "platform_owner" | "platform_owner_grace" | null; mfaGraceUntil?: string | null };

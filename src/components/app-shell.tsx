@@ -222,6 +222,13 @@ export function AppShell({ ctx, orgs, isDemo, branding, children }: { ctx: Ctx; 
           <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="rounded-xl border border-border p-2 text-ink-2 hover:bg-surface-2" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} data-testid="theme-toggle">{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}</button>
         </header>
         {isDemo && <div className="no-print bg-[linear-gradient(90deg,rgba(245,158,11,.14),rgba(245,158,11,.06))] px-4 py-1.5 text-center text-[11px] font-semibold text-gold-ink" data-testid="demo-banner">Synthetic demo data — this organization&apos;s activity, people and costs are generated for demonstration and testing only.</div>}
+        {ctx.mfaRequiredReason === "platform_owner_grace" && !ctx.mfaEnabled && ctx.mfaGraceUntil && (
+          <div className="no-print border-b border-warn bg-warn-soft px-4 py-2 text-center text-xs text-ink" role="status" data-testid="mfa-grace-banner">
+            <strong>Set up two-factor authentication.</strong> Your account manages every client organization; MFA becomes required on{" "}
+            {new Date(ctx.mfaGraceUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" })}.{" "}
+            <a href="/app/settings/security" className="font-semibold text-royal underline">Set up now (1 minute)</a>
+          </div>
+        )}
         <main id="main" className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-3 py-5 sm:px-5 lg:px-8 lg:py-7">{children}</main>
       </div>
       <AssistantPanel enabled={canAssist} />

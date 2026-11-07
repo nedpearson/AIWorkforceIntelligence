@@ -44,7 +44,7 @@ export async function getCtx(): Promise<Ctx | null> {
     }
   }
   const mfa = mfaRequirement({ role: m.role, email: s.user.email, orgSettings: m.settings });
-  return { userId: s.user.id, email: s.user.email, orgId: m.orgId, role: m.role, orgKind: m.kind, orgName: m.name, employeeId: m.employeeId, mfaEnabled: rows[0].mfaEnabled, mfaRequired: mfa.required, mfaRequiredReason: mfa.reason };
+  return { userId: s.user.id, email: s.user.email, orgId: m.orgId, role: m.role, orgKind: m.kind, orgName: m.name, employeeId: m.employeeId, mfaEnabled: rows[0].mfaEnabled, mfaRequired: mfa.required, mfaRequiredReason: mfa.reason, mfaGraceUntil: mfa.graceUntil ?? null };
 }
 
 /**

@@ -11,6 +11,16 @@ describe("mfa policy", () => {
     expect(mfaRequirement({ role: "viewer", email: "nedpearson@gmail.com" }, env).required).toBe(true);
     expect(isPlatformOwnerEmail("x@y.com", {})).toBe(false);
   });
+  it("platform-owner grace: banner instead of redirect until OWNER_MFA_GRACE_UNTIL, capped at 14 days, then required again", () => {
+    const now = new Date("2026-11-07T22:00:00Z");
+    const g = { ...env, OWNER_MFA_GRACE_UNTIL: "2026-11-14T23:59:59-06:00" };
+    const r = mfaRequirement({ role: "owner", email: "nedpearson@gmail.com" }, g, now);
+    expect(r.required).toBe(false); expect(r.reason).toBe("platform_owner_grace"); expect(r.graceUntil).toBe("2026-11-15T05:59:59.000Z");
+    expect(mfaRequirement({ role: "owner", email: "nedpearson@gmail.com" }, g, new Date("2026-11-16T00:00:00Z"))).toEqual({ required: true, reason: "platform_owner" });
+    expect(mfaRequirement({ role: "owner", email: "nedpearson@gmail.com" }, { ...env, OWNER_MFA_GRACE_UNTIL: "2027-06-01" }, now).required).toBe(true); // > 14 days ignored
+    expect(mfaRequirement({ role: "owner", email: "nedpearson@gmail.com" }, { ...env, OWNER_MFA_GRACE_UNTIL: "garbage" }, now).required).toBe(true);
+    expect(mfaRequirement({ role: "owner", email: "someone@else.com", orgSettings: { requireMfaForAdmins: true } }, g, now).reason).toBe("org_policy"); // grace is owner-only
+  });
   it("org policy applies to owner/admin/consultant only", () => {
     const s = { requireMfaForAdmins: true };
     for (const r of ["owner", "admin", "consultant"]) expect(mfaRequirement({ role: r, email: "a@b.com", orgSettings: s }, {}).reason).toBe("org_policy");
