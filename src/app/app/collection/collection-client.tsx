@@ -1,4 +1,5 @@
 "use client";
+const localDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, Button, Badge, Input, Select, Textarea, Modal, Tooltip, Empty, Table, Th, Td } from "@/components/ui";
@@ -206,7 +207,7 @@ function CollectorsTab({ data }: { data: CollectionData }) {
 
 // ---------------- Campaigns ----------------
 type CampaignForm = { id?: string; name: string; description: string; startsAt: string; endsAt: string; departmentIds: string[]; employeeIds: string[]; useSchedule: boolean; days: number[]; start: string; end: string; titleMode: "hash" | "category" | "none"; blockedApps: string };
-const emptyForm = (): CampaignForm => ({ name: "", description: "", startsAt: new Date().toISOString().slice(0, 10), endsAt: new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10), departmentIds: [], employeeIds: [], useSchedule: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00", titleMode: "hash", blockedApps: "" });
+const emptyForm = (): CampaignForm => ({ name: "", description: "", startsAt: localDate(new Date()), endsAt: localDate(new Date(Date.now() + 14 * 86400_000)), departmentIds: [], employeeIds: [], useSchedule: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00", titleMode: "hash", blockedApps: "" });
 function CampaignsTab({ data }: { data: CollectionData }) {
   const a = useAction();
   const [open, setOpen] = React.useState(false);

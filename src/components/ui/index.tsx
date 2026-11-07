@@ -26,7 +26,7 @@ export function Button({ className, variant = "primary", size = "md", href, load
     variant === "danger" && "bg-danger text-white hover:bg-danger/90",
     className,
   );
-  if (href) return <Link href={href} className={cls}>{children}</Link>;
+  if (href) { const { type: _t, disabled: _d, onClick: _o, ...rest } = p as Record<string, unknown>; void _t; void _d; void _o; return <Link href={href} className={cls} {...(rest as object)}>{children}</Link>; }
   return <button className={cls} disabled={disabled || loading} {...p}>{loading && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />}{children}</button>;
 }
 export function Badge({ children, tone = "neutral", className }: { children: React.ReactNode; tone?: "neutral" | "brand" | "money" | "warn" | "danger" | "info" | "verified" | "projected"; className?: string }) {

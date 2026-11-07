@@ -6,7 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { inflateSync } from "node:zlib";
 import { db, schema } from "@/db/client";
-import { opportunityEconomics } from "@/engine/costing";
+import { DEFAULTS, IMPLEMENTATION_PROFILES, opportunityEconomics } from "@/engine/costing";
 import { ensureDefaultFinancialModel, computeOrgFinancials, recordSavingsFromRunLedger, generateExecutiveReport } from "@/engine/finance";
 
 const ids = { org: "", ops: "", fin: "", e1: "", e2: "", e3: "", e4: "", w1: "", w2: "", w3: "", o1: "", o2: "", o3: "", a1: "" };
@@ -23,9 +23,15 @@ const O2_REC = 10 * 0.6 * 0.75; // 4.5
 const O2_GROSS = O2_REC * 48 * H3; // 14,040
 const GROSS = O1_GROSS + O2_GROSS;
 const REALIZABLE = GROSS * 0.6;
-const IMPL = (40 * 1.5 * 175 + 1500) + (60 * 1.2 * 175 + 3000); // 12,000 + 15,600
-const OPEX = 149 * 12 + 220 * 12; // 1,788 + 2,640
-const PLATFORM_BASE = 499 * 12;
+// Implementation/opex derive from IMPLEMENTATION_PROFILES so profile tuning doesn't break the hand calc:
+// O1 = ai_agent (24 h, $500) at complexity 0.5; O2 = rpa (40 h, $1,500, $180/mo) at complexity 0.2.
+const AI = IMPLEMENTATION_PROFILES.ai_agent, RPA = IMPLEMENTATION_PROFILES.rpa;
+const implAt = (p: { consultingHours: number; toolingOneTime: number }, complexity: number, hourly: number = DEFAULTS.consultingHourly) => p.consultingHours * (1 + complexity) * hourly + p.toolingOneTime;
+const O1_IMPL = implAt(AI, 0.5); // 24 × 1.5 × 175 + 500 = 6,800
+const O2_IMPL = implAt(RPA, 0.2); // 40 × 1.2 × 175 + 1,500 = 9,900
+const IMPL = O1_IMPL + O2_IMPL;
+const OPEX = AI.monthlyRun * 12 + RPA.monthlyRun * 12; // 1,788 + 2,160
+const PLATFORM_BASE = DEFAULTS.platformFeeMonthly * 12;
 const NET = REALIZABLE - OPEX - PLATFORM_BASE;
 
 /** Decompress every FlateDecode stream in a pdfkit buffer and decode its hex-encoded TJ text runs into plain strings. */
@@ -73,7 +79,7 @@ beforeAll(async () => {
   ids.o1 = await opp("Automate invoice entry", ids.w1, ops.id, "ai_agent", 20, 0.5, W1_AVG, 2, 0.5, "identified");
   ids.o2 = await opp("Bot for month-end reconciliation", ids.w2, fin.id, "rpa", 10, 0.6, H3, 1, 0.2, "identified");
   ids.o3 = await opp("Rejected idea", ids.w3, ops.id, "process_change", 15, 0.3, W1_AVG, 2, 0, "rejected");
-  const [agent] = await db.insert(schema.agents).values({ orgId: org.id, opportunityId: ids.o1, workflowId: ids.w1, name: "Invoice agent", category: "ap_ar", templateKey: "invoice_entry", status: "deployed", monthlyCost: "149", definition: { nodes: [], edges: [] }, deployedAt: new Date("2026-09-25T00:00:00Z") }).returning();
+  const [agent] = await db.insert(schema.agents).values({ orgId: org.id, opportunityId: ids.o1, workflowId: ids.w1, name: "Invoice agent", category: "ap_ar", templateKey: "invoice_entry", status: "deployed", monthlyCost: String(DEFAULTS.perAgentMonthly), definition: { nodes: [], edges: [] }, deployedAt: new Date("2026-09-25T00:00:00Z") }).returning();
   ids.a1 = agent.id;
   const run = (status: "succeeded" | "failed", minutesSaved: number, humanMinutes: number, finishedAt: string) =>
     db.insert(schema.agentRuns).values({ orgId: org.id, agentId: agent.id, status, minutesSaved: String(minutesSaved), humanMinutes: String(humanMinutes), startedAt: new Date(finishedAt), finishedAt: new Date(finishedAt) });
@@ -105,6 +111,7 @@ describe("computeOrgFinancials", () => {
     const f = await computeOrgFinancials(ids.org);
     expect(f.employeesAnalyzed).toBe(3);
     expect(f.totalAnnualLaborAnalyzed).toBeCloseTo(LABOR, 4);
+    // No activity_events in this fixture, so observed = max(0 active hrs, Σ workflow hrs 20 + 10 + 15) = 45
     expect(f.hoursObservedPerWeek).toBeCloseTo(45, 6);
     expect(f.repetitiveHoursPerWeek).toBeCloseTo(30, 6);
     expect(f.repetitiveSharePct).toBeCloseTo(30 / 45, 9);
@@ -115,7 +122,7 @@ describe("computeOrgFinancials", () => {
     expect(f.implementationCost).toBeCloseTo(IMPL, 4);
     expect(f.annualOperatingCost).toBeCloseTo(OPEX, 4);
     expect(f.deployedAgents).toBe(1);
-    expect(f.platformAnnual).toBeCloseTo(PLATFORM_BASE + 149 * 12, 4);
+    expect(f.platformAnnual).toBeCloseTo(PLATFORM_BASE + DEFAULTS.perAgentMonthly * 12, 4);
     expect(f.netAnnualSavings).toBeCloseTo(NET, 4);
     expect(f.roi1y).toBeCloseTo((NET - IMPL) / IMPL, 9);
     expect(f.paybackMonths).toBeCloseTo(IMPL / (NET / 12), 6);
@@ -161,9 +168,9 @@ describe("computeOrgFinancials", () => {
     expect(benefits.totalAnnualLaborAnalyzed).toBeCloseTo(204_000, 4);
     expect(benefits.grossAnnualSavings).toBeCloseTo(GROSS / 1.3, 4);
     const consulting = await computeOrgFinancials(ids.org, { consultingHourly: 100 });
-    expect(consulting.implementationCost).toBeCloseTo((40 * 1.5 * 100 + 1500) + (60 * 1.2 * 100 + 3000), 4);
+    expect(consulting.implementationCost).toBeCloseTo(implAt(AI, 0.5, 100) + implAt(RPA, 0.2, 100), 4);
     const perAgent = await computeOrgFinancials(ids.org, { perAgentMonthly: 99 });
-    expect(perAgent.annualOperatingCost).toBeCloseTo(99 * 12 + 220 * 12, 4);
+    expect(perAgent.annualOperatingCost).toBeCloseTo(99 * 12 + RPA.monthlyRun * 12, 4);
     expect(perAgent.platformAnnual).toBeCloseTo(PLATFORM_BASE + 99 * 12, 4);
     const auto = await computeOrgFinancials(ids.org, { automationPct: 0.5 });
     expect(auto.hoursRecoverablePerWeek).toBeCloseTo((O1_REC + O2_REC) / 2, 6);
@@ -176,7 +183,7 @@ describe("computeOrgFinancials", () => {
     const subset = await computeOrgFinancials(ids.org, { opportunityIds: [ids.o1] });
     expect(subset.opportunityCount).toBe(1);
     expect(subset.hoursRecoverablePerWeek).toBeCloseTo(O1_REC, 6);
-    expect(subset.implementationCost).toBeCloseTo(12_000, 4);
+    expect(subset.implementationCost).toBeCloseTo(O1_IMPL, 4);
     const override = await computeOrgFinancials(ids.org, { implementationCostOverride: 5000, annualOpexOverride: 100 });
     expect(override.implementationCost).toBe(5000); expect(override.annualOperatingCost).toBe(100);
   });
@@ -190,7 +197,7 @@ describe("recordSavingsFromRunLedger", () => {
     expect(Number(m.hoursSaved)).toBeCloseTo(3, 2);
     expect(Number(m.hoursAfter)).toBeCloseTo(20 / 60, 2);
     expect(Number(m.dollarsSaved)).toBeCloseTo(3 * W1_AVG, 2);
-    expect(Number(m.costIncurred)).toBeCloseTo(149 * (30 / (365.25 / 12)), 2);
+    expect(Number(m.costIncurred)).toBeCloseTo(DEFAULTS.perAgentMonthly * (30 / (365.25 / 12)), 2);
     expect(m.calculation.basis).toBe("observed");
     expect(m.calculation.children?.find((c) => c.label === "Average loaded hourly cost")?.value).toBeCloseTo(W1_AVG, 6);
     const again = await recordSavingsFromRunLedger(ids.org, ids.a1, start, end);

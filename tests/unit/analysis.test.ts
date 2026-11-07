@@ -38,46 +38,67 @@ afterAll(async () => {
 const wfRows = () => db.select().from(schema.workflows).where(eq(schema.workflows.orgId, ids.org));
 const oppRows = () => db.select().from(schema.opportunities).where(eq(schema.opportunities.orgId, ids.org));
 const findWf = (rows: Awaited<ReturnType<typeof wfRows>>, apps: string[], title: string) => rows.find((w) => apps.every((a) => w.steps.some((s) => s.app === a)) && w.steps.some((s) => s.action.startsWith(title)));
+/** Employee keys in DEMO_ORG assigned a given synthetic pattern — the expected performer set for the matching workflow. */
+const performersOf = (pattern: string) => DEMO_ORG.employees.filter((e) => e.patterns.some((p) => p.pattern === pattern)).map((e) => e.key);
+const performerIds = (pattern: string) => performersOf(pattern).map((k) => empIds[k]).sort();
+/** Expected runs/week for a pattern = Σ runsPerDay × 5 working days (variance averages out over 20 days). */
+const runsPerWeekOf = (pattern: string) => DEMO_ORG.employees.reduce((s, e) => s + e.patterns.filter((p) => p.pattern === pattern).reduce((a, p) => a + p.runsPerDay, 0), 0) * 5;
 
 describe("runAnalysis on the synthetic demo org (seed 42, 20 days)", () => {
   let result: Awaited<ReturnType<typeof runAnalysis>>;
   it("creates a finished analysis run with counts and a summary", async () => {
     result = await runAnalysis({ orgId: ids.org, campaignId: ids.campaign });
     expect(result.eventsAnalyzed).toBeGreaterThan(10000);
-    expect(result.workflowsFound).toBeGreaterThanOrEqual(8);
-    expect(result.opportunitiesFound).toBeGreaterThanOrEqual(6);
+    expect(result.workflowsFound).toBeGreaterThanOrEqual(9);
+    expect(result.opportunitiesFound).toBeGreaterThanOrEqual(7);
     const [run] = await db.select().from(schema.analysisRuns).where(eq(schema.analysisRuns.id, result.runId));
     expect(run.status).toBe("done"); expect(run.orgId).toBe(ids.org); expect(run.campaignId).toBe(ids.campaign);
     const s = run.summary as Record<string, number>;
-    expect(s.observedWeeks).toBe(4); expect(s.totalHoursPerWeek).toBeGreaterThan(60); expect(s.repetitiveHoursPerWeek).toBeGreaterThan(50);
+    // 24 employees: ~215 h/wk observed, ~160 h/wk in repetitive workflows
+    expect(s.observedWeeks).toBe(4); expect(s.totalHoursPerWeek).toBeGreaterThan(150); expect(s.repetitiveHoursPerWeek).toBeGreaterThan(120);
     expect(s.repetitiveHoursPerWeek).toBeLessThanOrEqual(s.totalHoursPerWeek); expect(s.idleShare).toBeGreaterThan(0); expect(s.idleShare).toBeLessThan(0.2);
     expect((run.summary as { topApps: { app: string }[] }).topApps[0].app).toBe("NetSuite");
   });
 
   it("finds workflows that map to the synthetic patterns with sensible hours", async () => {
     const wfs = await wfRows();
-    expect(wfs.length).toBeGreaterThanOrEqual(8);
+    expect(wfs.length).toBeGreaterThanOrEqual(9);
     expect(wfs.every((w) => w.basis === "observed" && w.isManual && w.analysisRunId === result.runId)).toBe(true);
 
     const ap = findWf(wfs, ["Outlook", "Adobe Acrobat", "QuickBooks", "Excel"], "bill entry")!;
     expect(ap).toBeDefined(); expect(ap.name).toMatch(/Bill entry \(Outlook → Adobe Acrobat → QuickBooks → Excel\)/);
-    expect(Number(ap.runsPerWeek)).toBeGreaterThan(50); expect(Number(ap.runsPerWeek)).toBeLessThan(80); // (9 + 4) runs/day × 5
+    const apRuns = runsPerWeekOf("ap_invoice"); // (9 + 4 + 8 + 6) runs/day × 5 = 135
+    expect(Number(ap.runsPerWeek)).toBeGreaterThan(apRuns * 0.8); expect(Number(ap.runsPerWeek)).toBeLessThan(apRuns * 1.2);
     expect(Number(ap.avgDurationMin)).toBeGreaterThan(8); expect(Number(ap.avgDurationMin)).toBeLessThan(11);
-    expect(Number(ap.hoursPerWeek)).toBeGreaterThan(8); expect(ap.employeeCount).toBe(2); expect(ap.handoffCount).toBeGreaterThan(200);
+    expect(Number(ap.hoursPerWeek)).toBeGreaterThan(18); expect(ap.employeeCount).toBe(performersOf("ap_invoice").length); expect(ap.handoffCount).toBeGreaterThan(400);
     expect(Number(ap.reworkRate)).toBeGreaterThan(0.05); expect(ap.departmentId).toBe(deptIds.Finance); expect(ap.requiresJudgment).toBe(false);
-    expect(ap.evidence.sampleSize).toBeGreaterThan(200); expect(ap.evidence.eventIds.length).toBe(200); expect(ap.evidence.employeeIds?.sort()).toEqual([empIds.e1, empIds.e2].sort());
+    expect(ap.evidence.sampleSize).toBeGreaterThan(400); expect(ap.evidence.eventIds.length).toBe(200); expect(ap.evidence.employeeIds?.sort()).toEqual(performerIds("ap_invoice"));
     expect(ap.processMap!.nodes).toHaveLength(6); expect(ap.processMap!.edges.length).toBeGreaterThanOrEqual(5);
 
     const order = findWf(wfs, ["Outlook", "Chrome", "NetSuite", "Excel"], "sales order")!;
-    expect(order.name).toContain("Sales order"); expect(order.employeeCount).toBe(3); expect(Number(order.runsPerWeek)).toBeGreaterThan(120);
+    // order entry: 5 Operations clerks/purchasing + 3 Sales reps/coordinator = 8 performers, ~350 runs/wk, the biggest workflow by hours
+    expect(order.name).toContain("Sales order"); expect(order.employeeCount).toBeGreaterThanOrEqual(6); expect(order.employeeCount).toBe(performersOf("order_entry").length);
+    expect(Number(order.runsPerWeek)).toBeGreaterThan(300); expect(Number(order.hoursPerWeek)).toBeGreaterThan(45);
     const orderEmps = await db.select().from(schema.workflowEmployees).where(eq(schema.workflowEmployees.workflowId, order.id));
-    expect(orderEmps.map((x) => x.employeeId).sort()).toEqual([empIds.e4, empIds.e5, empIds.e9].sort()); // two clerks + sales coordinator
+    expect(orderEmps.map((x) => x.employeeId).sort()).toEqual(performerIds("order_entry"));
+    const orderDepts = new Set(DEMO_ORG.employees.filter((e) => performersOf("order_entry").includes(e.key)).map((e) => e.department));
+    expect([...orderDepts].sort()).toEqual(["Operations", "Sales"]);
     expect(orderEmps.every((x) => x.orgId === ids.org && Number(x.hoursPerWeek) > 0)).toBe(true);
     expect(order.evidence.notes?.some((n) => n.includes("2 departments"))).toBe(true);
 
     const support = findWf(wfs, ["Zendesk", "Chrome", "NetSuite"], "ticket reply")!;
-    expect(support.employeeCount).toBe(2); expect(Number(support.runsPerWeek)).toBeGreaterThan(150);
-    expect(findWf(wfs, ["Outlook", "Chrome"], "scheduling reply")!.employeeCount).toBe(4);
+    expect(support.employeeCount).toBe(performersOf("support_ticket").length); // 4 reps + team lead
+    expect(Number(support.runsPerWeek)).toBeGreaterThan(400); expect(Number(support.hoursPerWeek)).toBeGreaterThan(45);
+    expect(findWf(wfs, ["Outlook", "Chrome"], "scheduling reply")!.employeeCount).toBe(performersOf("appointment_scheduling").length); // 9 across Sales, CS, HR
+
+    // low-frequency weekly report now occurs: one run/week each for 8 people across 5 departments
+    const weekly = findWf(wfs, ["NetSuite", "Excel", "PowerPoint", "Outlook"], "weekly report")!;
+    expect(weekly).toBeDefined(); expect(weekly.name).toMatch(/^Weekly report/);
+    expect(weekly.employeeCount).toBe(performersOf("weekly_report").length); expect(weekly.employeeCount).toBeGreaterThanOrEqual(6);
+    const weeklyRuns = runsPerWeekOf("weekly_report"); // 8 × 0.2 × 5 = 8
+    expect(Number(weekly.runsPerWeek)).toBeGreaterThan(weeklyRuns * 0.6); expect(Number(weekly.runsPerWeek)).toBeLessThan(weeklyRuns * 1.6);
+    expect(Number(weekly.avgDurationMin)).toBeGreaterThan(18); expect(Number(weekly.hoursPerWeek)).toBeGreaterThan(2);
+    expect(weekly.evidence.notes?.some((n) => n.includes("5 departments"))).toBe(true); expect(weekly.requiresJudgment).toBe(false);
     expect(findWf(wfs, ["Chrome", "Adobe Acrobat", "Outlook", "Excel"], "hr system")).toMatchObject({ regulatoryFlag: "PII", requiresJudgment: false });
     expect(findWf(wfs, ["Excel", "NetSuite", "Outlook"], "inventory adjustment")!.handoffCount).toBeGreaterThan(10);
     expect(findWf(wfs, ["Chrome", "Excel", "Slack"], "campaign tracker")).toBeDefined();
@@ -92,19 +113,23 @@ describe("runAnalysis on the synthetic demo org (seed 42, 20 days)", () => {
 
   it("produces ranked, evidence-backed opportunities with costing trees", async () => {
     const opps = await oppRows(); const wfs = await wfRows();
-    expect(opps.length).toBeGreaterThanOrEqual(6);
+    expect(opps.length).toBeGreaterThanOrEqual(7);
     expect(opps.map((o) => o.rank).sort((a, b) => a - b)).toEqual(opps.map((_, i) => i + 1));
     expect(opps.every((o) => o.basis === "estimated" && o.status === "identified" && o.calculation.label === "Realizable annual savings" && o.evidence.sampleSize > 0 && o.summary.includes("Observed"))).toBe(true);
     const byWf = new Map(opps.map((o) => [o.workflowId, o]));
     const order = byWf.get(findWf(wfs, ["Outlook", "Chrome", "NetSuite", "Excel"], "sales order")!.id)!;
     expect(order.rank).toBe(1); expect(order.type).toBe("rpa"); expect(order.recommendedAgentCategory).toBe("sales_crm");
     expect(Number(order.automationPct)).toBeLessThanOrEqual(0.8); expect(Number(order.realizableAnnualSavings)).toBeLessThan(Number(order.grossAnnualSavings));
-    expect(order.summary).toMatch(/Observed \d+ runs over 4\.0 weeks by 3 people/); expect(order.summary).toContain("NetSuite");
+    expect(order.summary).toMatch(new RegExp(`Observed \\d+ runs over 4\\.0 weeks by ${performersOf("order_entry").length} people`)); expect(order.summary).toContain("NetSuite");
     const ap = byWf.get(findWf(wfs, ["Outlook", "Adobe Acrobat", "QuickBooks", "Excel"], "bill entry")!.id)!;
     expect(ap.type).toBe("rpa"); expect(ap.recommendedAgentCategory).toBe("invoice"); expect(ap.departmentId).toBe(deptIds.Finance);
     const support = byWf.get(findWf(wfs, ["Zendesk", "Chrome", "NetSuite"], "ticket reply")!.id)!;
     expect(["ai_agent", "process_change"]).toContain(support.type); expect(support.recommendedAgentCategory).toBe("customer_service");
     expect(byWf.get(findWf(wfs, ["Outlook", "Chrome"], "scheduling reply")!.id)).toMatchObject({ type: "ai_agent", recommendedAgentCategory: "scheduling" });
+    // the weekly report (export → paste → deck → email) is a reporting integration, not an agent
+    const weekly = byWf.get(findWf(wfs, ["NetSuite", "Excel", "PowerPoint", "Outlook"], "weekly report")!.id)!;
+    expect(weekly).toMatchObject({ type: "conventional_automation", recommendedAgentCategory: "reporting" });
+    expect(Number(weekly.realizableAnnualSavings)).toBeLessThan(Number(order.realizableAnnualSavings));
     // judgment-heavy work gets no opportunity
     expect(byWf.has(findWf(wfs, ["Chrome", "Excel", "QuickBooks"], "reconcile")!.id)).toBe(false);
     expect(byWf.has(findWf(wfs, ["Outlook", "Word"], "contract")!.id)).toBe(false);
@@ -153,6 +178,6 @@ describe("performance", () => {
     const t0 = Date.now();
     const r = await runAnalysis({ orgId: s.orgId });
     expect(Date.now() - t0).toBeLessThan(30000);
-    expect(r.eventsAnalyzed).toBe(s.eventCount); expect(r.workflowsFound).toBeGreaterThanOrEqual(8);
+    expect(r.eventsAnalyzed).toBe(s.eventCount); expect(r.workflowsFound).toBeGreaterThanOrEqual(9);
   });
 });

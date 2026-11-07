@@ -31,11 +31,11 @@ export function loadedHourlyCost(baseAnnualCost: number, benefitsLoadPct: number
 
 /** Implementation effort heuristics by opportunity type (consulting hours + tooling). */
 export const IMPLEMENTATION_PROFILES: Record<string, { consultingHours: number; toolingOneTime: number; monthlyRun: number; label: string }> = {
-  ai_agent: { consultingHours: 40, toolingOneTime: 1500, monthlyRun: DEFAULTS.perAgentMonthly, label: "AI agent (LLM + integrations)" },
-  rpa: { consultingHours: 60, toolingOneTime: 3000, monthlyRun: 220, label: "RPA bot" },
-  conventional_automation: { consultingHours: 24, toolingOneTime: 500, monthlyRun: 40, label: "Integration / scripted automation" },
-  process_change: { consultingHours: 16, toolingOneTime: 0, monthlyRun: 0, label: "Process redesign (no software)" },
-  role_consolidation: { consultingHours: 12, toolingOneTime: 0, monthlyRun: 0, label: "Role / capacity reallocation" },
+  ai_agent: { consultingHours: 24, toolingOneTime: 500, monthlyRun: DEFAULTS.perAgentMonthly, label: "AI agent (LLM + integrations)" },
+  rpa: { consultingHours: 40, toolingOneTime: 1500, monthlyRun: 180, label: "RPA bot" },
+  conventional_automation: { consultingHours: 12, toolingOneTime: 250, monthlyRun: 30, label: "Integration / scripted automation" },
+  process_change: { consultingHours: 10, toolingOneTime: 0, monthlyRun: 0, label: "Process redesign (no software)" },
+  role_consolidation: { consultingHours: 8, toolingOneTime: 0, monthlyRun: 0, label: "Role / capacity reallocation" },
 };
 
 export type OpportunityInput = {

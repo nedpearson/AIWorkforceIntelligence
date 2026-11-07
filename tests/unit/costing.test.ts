@@ -17,6 +17,11 @@ describe("loadedHourlyCost", () => {
 
 describe("opportunityEconomics", () => {
   const base = { type: "ai_agent" as const, hoursPerWeek: 20, automationPct: 0.5, avgLoadedHourly: 50, employeeCount: 2, complexity: 0.5 };
+  // Hand values derived from the profile so they survive profile tuning but stay checkable.
+  // With ai_agent = 24 h / $500 / $149/mo and complexity 0.5: impl = 24 × 1.5 × 175 + 500 = 6,800; opex = 1,788.
+  const AI = IMPLEMENTATION_PROFILES.ai_agent;
+  const IMPL = AI.consultingHours * (1 + base.complexity) * DEFAULTS.consultingHourly + AI.toolingOneTime;
+  const OPEX = AI.monthlyRun * 12;
   it("matches hand calculation with defaults", () => {
     const e = opportunityEconomics(base);
     // recoverable = 20 × 0.5 × 0.75 = 7.5
@@ -25,17 +30,16 @@ describe("opportunityEconomics", () => {
     expect(e.grossAnnualSavings).toBeCloseTo(18_000, 6);
     // realizable = 18,000 × 0.6 = 10,800
     expect(e.realizableAnnualSavings).toBeCloseTo(10_800, 6);
-    // implementation = 40 × 1.5 × 175 + 1500 = 10,500 + 1,500 = 12,000
-    expect(e.implementationCost).toBeCloseTo(12_000, 6);
-    // operating = 149 × 12 = 1,788
-    expect(e.annualOperatingCost).toBeCloseTo(1_788, 6);
-    // net = 10,800 − 1,788 = 9,012
-    expect(e.netAnnualSavings).toBeCloseTo(9_012, 6);
-    // payback = 12,000 ÷ (9,012 ÷ 12) = 15.978 months
-    expect(e.paybackMonths).toBeCloseTo(12_000 / (9_012 / 12), 6);
-    // roi1y = (9,012 − 12,000) ÷ 12,000 = −0.249
-    expect(e.roi1y).toBeCloseTo((9_012 - 12_000) / 12_000, 9);
-    expect(e.roi3y).toBeCloseTo((9_012 * 3 - 12_000) / 12_000, 9);
+    // implementation = consultingHours × (1 + 0.5) × 175 + tooling
+    expect(e.implementationCost).toBeCloseTo(IMPL, 6);
+    // operating = monthlyRun × 12
+    expect(e.annualOperatingCost).toBeCloseTo(OPEX, 6);
+    const NET = 10_800 - OPEX;
+    expect(e.netAnnualSavings).toBeCloseTo(NET, 6);
+    // payback = implementation ÷ (net ÷ 12)
+    expect(e.paybackMonths).toBeCloseTo(IMPL / (NET / 12), 6);
+    expect(e.roi1y).toBeCloseTo((NET - IMPL) / IMPL, 9);
+    expect(e.roi3y).toBeCloseTo((NET * 3 - IMPL) / IMPL, 9);
     expect(e.tree.basis).toBe("estimated");
     expect(e.tree.children?.every((c) => c.basis)).toBe(true);
   });
@@ -49,7 +53,7 @@ describe("opportunityEconomics", () => {
     expect(e.hoursRecoverablePerWeek).toBeCloseTo(10, 9);
     expect(e.grossAnnualSavings).toBeCloseTo(10 * 50 * 50, 6);
     expect(e.realizableAnnualSavings).toBeCloseTo(e.grossAnnualSavings, 6);
-    expect(e.implementationCost).toBeCloseTo(40 * 1.5 * 100 + 1500, 6);
+    expect(e.implementationCost).toBeCloseTo(AI.consultingHours * 1.5 * 100 + AI.toolingOneTime, 6);
   });
   it("perAgentMonthly replaces the ai_agent run cost only; costMult scales costs", () => {
     const ai = opportunityEconomics({ ...base, perAgentMonthly: 99 });
@@ -57,13 +61,15 @@ describe("opportunityEconomics", () => {
     const rpa = opportunityEconomics({ ...base, type: "rpa", perAgentMonthly: 99 });
     expect(rpa.annualOperatingCost).toBeCloseTo(IMPLEMENTATION_PROFILES.rpa.monthlyRun * 12, 6);
     const scaled = opportunityEconomics({ ...base, costMult: 1.3 });
-    expect(scaled.implementationCost).toBeCloseTo(12_000 * 1.3, 6);
-    expect(scaled.annualOperatingCost).toBeCloseTo(1_788 * 1.3, 6);
+    expect(scaled.implementationCost).toBeCloseTo(IMPL * 1.3, 6);
+    expect(scaled.annualOperatingCost).toBeCloseTo(OPEX * 1.3, 6);
     expect(scaled.realizableAnnualSavings).toBeCloseTo(10_800, 6);
   });
   it("process_change has no tooling or run cost", () => {
     const e = opportunityEconomics({ ...base, type: "process_change", complexity: 0 });
-    expect(e.implementationCost).toBeCloseTo(16 * DEFAULTS.consultingHourly, 6);
+    const PC = IMPLEMENTATION_PROFILES.process_change;
+    expect(PC.toolingOneTime).toBe(0); expect(PC.monthlyRun).toBe(0);
+    expect(e.implementationCost).toBeCloseTo(PC.consultingHours * DEFAULTS.consultingHourly, 6);
     expect(e.annualOperatingCost).toBe(0);
   });
 });

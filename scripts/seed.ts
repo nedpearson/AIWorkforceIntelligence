@@ -11,6 +11,7 @@ import { DEMO_ORG, generateEvents } from "../src/engine/synthetic";
 import { sha256, randomToken } from "../src/lib/crypto";
 import { runAnalysis } from "../src/engine/analysis";
 import { ensureDefaultFinancialModel } from "../src/engine/finance";
+import { DEFAULT_NOTICE_VERSION } from "../src/collector-protocol/schema";
 
 const PASSWORD = process.env.SEED_PASSWORD ?? "Demo!Pass123";
 
@@ -57,7 +58,7 @@ async function main() {
 
   const collectorIds: Record<string, string> = {};
   for (const e of DEMO_ORG.employees) {
-    await db.insert(schema.consentRecords).values({ orgId: client.id, employeeId: empIds[e.key], noticeVersion: "2026-10-v1", noticeText, acknowledgedAt: new Date(Date.now() - 30 * 86400000), method: "collector_ui" });
+    await db.insert(schema.consentRecords).values({ orgId: client.id, employeeId: empIds[e.key], noticeVersion: DEFAULT_NOTICE_VERSION, noticeText, acknowledgedAt: new Date(Date.now() - 30 * 86400000), method: "collector_ui" });
     const [c] = await db.insert(schema.collectors).values({ orgId: client.id, employeeId: empIds[e.key], name: `${e.name.split(" ")[0]}'s workstation`, platform: "simulated", tokenHash: sha256(randomToken()), status: "active", version: "0.1.0-sim", lastSeenAt: new Date(Date.now() - 3600000), lastEventAt: new Date(Date.now() - 86400000), config: { titleMode: "category", idleThresholdSec: 180 } }).returning();
     collectorIds[e.key] = c.id;
   }

@@ -9,6 +9,7 @@ import { db, schema } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { sha256, randomToken } from "@/lib/crypto";
 import { enqueue } from "@/engine/jobs";
+import { assertSeatAvailable, SeatLimitError } from "@/engine/billing";
 import { DEFAULT_NOTICE_TEXT, DEFAULT_NOTICE_VERSION, CollectorConfigSchema } from "@/collector-protocol/schema";
 import { withdrawAndPause, currentNotice } from "./consent-lib";
 
@@ -74,6 +75,7 @@ const EnrollInput = z.object({ employeeId: uuid, name: z.string().min(1).max(80)
 export async function createEnrollmentCode(raw: unknown): Promise<Result<{ collectorId: string; code: string; url: string }>> {
   const ctx = await requireCtx("collectors:manage");
   const p = EnrollInput.safeParse(raw); if (!p.success) return fail(p.error.issues[0]?.message ?? "invalid");
+  try { await assertSeatAvailable(ctx.orgId, p.data.employeeId); } catch (e) { if (e instanceof SeatLimitError) return fail(e.message); throw e; }
   const code = `BB-${randomToken(9).replace(/[^A-Za-z0-9]/g, "").slice(0, 12).toUpperCase()}`;
   const collectorId = await withTenant(ctx.orgId, async (tx) => {
     const [emp] = await tx.select({ id: schema.employees.id }).from(schema.employees).where(and(eq(schema.employees.id, p.data.employeeId), eq(schema.employees.orgId, ctx.orgId))).limit(1);

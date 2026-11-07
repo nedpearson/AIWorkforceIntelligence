@@ -79,6 +79,7 @@ type Loaded = {
   agents: (typeof schema.agents.$inferSelect)[];
   measurements: (typeof schema.savingsMeasurements.$inferSelect)[];
   employeesWithEvents: Set<string>;
+  activeHoursPerWeek: number; // total non-idle observed time ÷ observed weeks (activity_events)
 };
 
 async function loadOrg(tx: TenantDb, orgId: string): Promise<Loaded> {
@@ -97,7 +98,10 @@ async function loadOrg(tx: TenantDb, orgId: string): Promise<Loaded> {
     tx.select().from(schema.savingsMeasurements).where(eq(schema.savingsMeasurements.orgId, orgId)),
     tx.selectDistinct({ employeeId: schema.activityEvents.employeeId }).from(schema.activityEvents).where(eq(schema.activityEvents.orgId, orgId)),
   ]);
-  return { org, model, departments, employees, workflows, workflowEmployees, opportunities, agents, measurements, employeesWithEvents: new Set(eventEmps.map((e) => e.employeeId)) };
+  const [act] = await tx.execute(sql`select coalesce(sum(duration_ms),0)::float8 as ms, count(distinct date(ts)) as days from activity_events where org_id = ${orgId} and type not in ('idle_start','idle_end')`) as unknown as { ms: number; days: number }[];
+  const activeDays = Number(act?.days ?? 0); const weeks = activeDays > 0 ? Math.max(activeDays / 5, 0.2) : 0;
+  const activeHoursPerWeek = weeks > 0 ? Number(act.ms) / 3_600_000 / weeks : 0;
+  return { org, model, departments, employees, workflows, workflowEmployees, opportunities, agents, measurements, employeesWithEvents: new Set(eventEmps.map((e) => e.employeeId)), activeHoursPerWeek };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -299,7 +303,9 @@ export async function computeOrgFinancials(orgId: string, overrides: FinancialOv
     if (laborChildren.length < 50) laborChildren.push({ label: e.displayName, value: annual, unit: "usd", basis, formula: base > 0 ? `${base} × (1 + ${a.benefitsLoadPct})` : `loaded hourly × ${hpw} × ${a.workWeeksPerYear}`, source: "Employee record" });
   }
 
-  const hoursObservedPerWeek = sum(d.workflows.map((w) => num(w.hoursPerWeek)));
+  const workflowHoursPerWeek = sum(d.workflows.map((w) => num(w.hoursPerWeek)));
+  // Observed = all non-idle activity (incl. ad-hoc work), so the repetitive share is honest.
+  const hoursObservedPerWeek = Math.max(d.activeHoursPerWeek, workflowHoursPerWeek);
   const repetitiveWfs = d.workflows.filter((w) => num(w.repetitionScore) >= 50);
   const repetitiveHoursPerWeek = sum(repetitiveWfs.map((w) => num(w.hoursPerWeek)));
   const repetitiveSharePct = hoursObservedPerWeek > 0 ? repetitiveHoursPerWeek / hoursObservedPerWeek : 0;
