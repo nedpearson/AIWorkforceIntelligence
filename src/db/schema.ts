@@ -154,6 +154,7 @@ export const employees = pgTable("employees", {
   location: text("location"),
   locationId: uuid("location_id"),
   businessUnitId: uuid("business_unit_id"),
+  photoAssetId: uuid("photo_asset_id"), // only with recorded consent (media_assets.provenance = employee_consented)
   // Compensation inputs used ONLY for loaded-cost math. Stored per-employee; never shown to peers.
   baseAnnualCost: numeric("base_annual_cost", { precision: 12, scale: 2 }),
   loadedHourlyCost: numeric("loaded_hourly_cost", { precision: 10, scale: 2 }),
@@ -642,6 +643,193 @@ export const dashboardViews = pgTable("dashboard_views", {
   createdAt: ts(),
 }, (t) => [index("views_org_user").on(t.orgId, t.userId, t.page)]);
 
+// ---------- Enterprise AI Brain ----------
+export const knowledgeStatus = pgEnum("knowledge_status", ["pending_review", "approved", "rejected", "archived"]);
+export const aiEmployeeStatus = pgEnum("ai_employee_status", ["draft", "sandbox", "pilot", "active", "paused", "retired"]);
+export const permissionLevel = pgEnum("permission_level", ["read_only", "draft_only", "act_with_approval", "autonomous"]);
+
+/** Where knowledge came from (upload, manual entry, connected app, BridgeBox-derived). */
+export const knowledgeSources = pgTable("knowledge_sources", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // upload | manual | integration | bridgebox
+  name: text("name").notNull(),
+  integrationProvider: text("integration_provider"),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  config: jsonb("config").$type<Record<string, unknown>>().default({}),
+  createdBy: uuid("created_by"),
+  createdAt: ts(),
+}, (t) => [index("ksources_org").on(t.orgId)]);
+
+/** Versioned, reviewable organizational documents (SOPs, policies, pricing, product sheets…). */
+export const knowledgeDocuments = pgTable("knowledge_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  sourceId: uuid("source_id").references(() => knowledgeSources.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  category: text("category").notNull().default("general"), // policy | procedure | pricing | product | customer | vendor | company | terminology | goal | decision | general
+  mimeType: text("mime_type").notNull().default("text/plain"),
+  departmentId: uuid("department_id"), // null = org-wide
+  allowedRoles: jsonb("allowed_roles").$type<string[]>().notNull().default([]), // empty = any member with workflows:read
+  status: knowledgeStatus("status").notNull().default("pending_review"),
+  version: integer("version").notNull().default(1),
+  supersedesId: uuid("supersedes_id"),
+  contentHash: text("content_hash").notNull(),
+  content: text("content").notNull(),
+  wordCount: integer("word_count").notNull().default(0),
+  reviewEveryDays: integer("review_every_days").notNull().default(180),
+  approvedBy: uuid("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdBy: uuid("created_by"),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("kdocs_org_status").on(t.orgId, t.status), index("kdocs_hash").on(t.orgId, t.contentHash)]);
+
+/** Retrieval units. Full-text search via a generated tsvector (see drizzle/brain_search.sql). */
+export const knowledgeChunks = pgTable("knowledge_chunks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  documentId: uuid("document_id").notNull().references(() => knowledgeDocuments.id, { onDelete: "cascade" }),
+  ordinal: integer("ordinal").notNull(),
+  heading: text("heading"),
+  text: text("text").notNull(),
+  createdAt: ts(),
+}, (t) => [index("kchunks_doc").on(t.documentId), index("kchunks_org").on(t.orgId)]);
+
+/** Structured business memory (facts). Corrections create a new pending version; nothing changes silently. */
+export const brainFacts = pgTable("brain_facts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  category: text("category").notNull(), // company | product | customer | vendor | policy | pricing | terminology | goal | decision | preference | procedure | system
+  subject: text("subject").notNull(),
+  statement: text("statement").notNull(),
+  departmentId: uuid("department_id"),
+  status: knowledgeStatus("status").notNull().default("pending_review"),
+  version: integer("version").notNull().default(1),
+  supersedesId: uuid("supersedes_id"),
+  sourceDocumentId: uuid("source_document_id"),
+  sourceRef: text("source_ref"), // e.g. "bridgebox:workflow:<id>" for derived facts
+  confidence: text("confidence").notNull().default("stated"), // stated | derived
+  createdBy: uuid("created_by"),
+  approvedBy: uuid("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("facts_org_status").on(t.orgId, t.status)]);
+
+/** Uploaded images (AI persona portraits, consented employee photos). Small images stored inline. */
+export const mediaAssets = pgTable("media_assets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // ai_portrait | employee_photo
+  mimeType: text("mime_type").notNull(),
+  bytesBase64: text("bytes_base64").notNull(),
+  provenance: text("provenance").notNull(), // ai_generated | licensed | employee_consented
+  credit: text("credit"),
+  consentRecordedBy: uuid("consent_recorded_by"),
+  consentAt: timestamp("consent_at", { withTimezone: true }),
+  createdBy: uuid("created_by"),
+  createdAt: ts(),
+}, (t) => [index("media_org").on(t.orgId)]);
+
+/** AI employees: a persona + business brain wrapped around an executable agent. Always labelled "AI Agent". */
+export const aiEmployees = pgTable("ai_employees", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  personaKey: text("persona_key"), // library persona, null for custom
+  firstName: text("first_name").notNull(),
+  title: text("title").notNull(),
+  team: text("team").notNull(), // executive | finance | sales | operations | marketing | hr | customer_service | custom
+  departmentId: uuid("department_id"),
+  intro: text("intro").notNull(),
+  responsibilities: jsonb("responsibilities").$type<string[]>().notNull().default([]),
+  expertise: jsonb("expertise").$type<string[]>().notNull().default([]),
+  skills: jsonb("skills").$type<string[]>().notNull().default([]),
+  knowledgeScope: jsonb("knowledge_scope").$type<{ departmentIds?: string[]; documentIds?: string[]; categories?: string[] }>().notNull().default({}),
+  instructions: text("instructions").notNull().default(""),
+  instructionsVersion: integer("instructions_version").notNull().default(1),
+  portraitUrl: text("portrait_url"), // /portraits/<key>.png or /api/media/<id>
+  portraitProvenance: text("portrait_provenance"), // ai_generated | licensed | none
+  status: aiEmployeeStatus("status").notNull().default("draft"),
+  permissionLevel: permissionLevel("permission_level").notNull().default("read_only"),
+  approvalOwnerUserId: uuid("approval_owner_user_id"),
+  agentId: uuid("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "set null" }),
+  monthlyRunBudget: integer("monthly_run_budget").notNull().default(500),
+  monthlyCostBudget: numeric("monthly_cost_budget", { precision: 10, scale: 2 }).notNull().default("250"),
+  connectedProviders: jsonb("connected_providers").$type<string[]>().notNull().default([]),
+  createdBy: uuid("created_by"),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("aiemp_org").on(t.orgId), uniqueIndex("aiemp_org_persona").on(t.orgId, t.personaKey)]);
+
+/** Every skill execution (sandbox demos and real tasks) — the AI employee's work history. */
+export const skillRuns = pgTable("skill_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  aiEmployeeId: uuid("ai_employee_id").notNull().references(() => aiEmployees.id, { onDelete: "cascade" }),
+  skillKey: text("skill_key").notNull(),
+  mode: text("mode").notNull(), // sandbox | live
+  status: text("status").notNull().default("running"), // running | awaiting_approval | succeeded | failed | rejected
+  input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
+  output: jsonb("output").$type<Record<string, unknown>>().notNull().default({}),
+  steps: jsonb("steps").$type<{ key: string; label: string; status: string; ms: number; detail?: string; data?: Record<string, unknown> }[]>().notNull().default([]),
+  citations: jsonb("citations").$type<{ type: string; id: string; label: string; href?: string }[]>().notNull().default([]),
+  durationMs: integer("duration_ms").notNull().default(0),
+  manualBaselineMinutes: numeric("manual_baseline_minutes", { precision: 8, scale: 2 }),
+  humanReviewMinutes: numeric("human_review_minutes", { precision: 8, scale: 2 }),
+  agentRunId: uuid("agent_run_id"),
+  requestedBy: uuid("requested_by"),
+  reviewStatus: text("review_status"), // accepted | corrected | rejected
+  reviewNote: text("review_note"),
+  reviewedBy: uuid("reviewed_by"),
+  error: text("error"),
+  createdAt: ts(),
+}, (t) => [index("skill_runs_org_emp").on(t.orgId, t.aiEmployeeId)]);
+
+/** Approved procedural improvements an AI employee retains (versioned; never alters security/permissions). */
+export const aiEmployeeMemory = pgTable("ai_employee_memory", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  aiEmployeeId: uuid("ai_employee_id").notNull().references(() => aiEmployees.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // instruction | procedure | correction | preference
+  text: text("text").notNull(),
+  status: knowledgeStatus("status").notNull().default("pending_review"),
+  sourceSkillRunId: uuid("source_skill_run_id"),
+  createdBy: uuid("created_by"),
+  approvedBy: uuid("approved_by"),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: ts(),
+}, (t) => [index("aiemp_mem_org").on(t.orgId, t.aiEmployeeId)]);
+
+export const aiConversations = pgTable("ai_conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  aiEmployeeId: uuid("ai_employee_id").references(() => aiEmployees.id, { onDelete: "cascade" }), // null = universal assistant
+  userId: uuid("user_id").notNull(),
+  title: text("title"),
+  createdAt: ts(), updatedAt: upd(),
+}, (t) => [index("aiconv_org_user").on(t.orgId, t.userId)]);
+
+export const aiMessages = pgTable("ai_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  conversationId: uuid("conversation_id").notNull().references(() => aiConversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // user | assistant
+  content: text("content").notNull(),
+  mode: text("mode"), // llm | retrieval
+  citations: jsonb("citations").$type<{ type: string; id: string; label: string; href?: string }[]>().notNull().default([]),
+  actions: jsonb("actions").$type<{ kind: string; label: string; href?: string; payload?: Record<string, unknown> }[]>().notNull().default([]),
+  createdAt: ts(),
+}, (t) => [index("aimsg_conv").on(t.conversationId)]);
+
+export const tourProgress = pgTable("tour_progress", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull(),
+  tourKey: text("tour_key").notNull(),
+  step: integer("step").notNull().default(0),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  updatedAt: upd(),
+}, (t) => [uniqueIndex("tour_user_key").on(t.orgId, t.userId, t.tourKey)]);
+
 // ---------- integrations, retention, audit ----------
 export const integrations = pgTable("integrations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -713,5 +901,7 @@ export const TENANT_TABLES = [
   "credentials", "agents", "agent_runs", "approvals", "savings_measurements", "financial_models", "projects",
   "reports", "subscriptions", "invoices", "integrations", "business_units", "locations", "project_milestones",
   "project_risks", "opportunity_decisions", "savings_ledger", "evaluations", "benchmark_datasets", "dashboard_views", "agent_versions",
+  "knowledge_sources", "knowledge_documents", "knowledge_chunks", "brain_facts", "media_assets", "ai_employees", "skill_runs",
+  "ai_employee_memory", "ai_conversations", "ai_messages", "tour_progress",
 ] as const;
 export const _sql = sql;
