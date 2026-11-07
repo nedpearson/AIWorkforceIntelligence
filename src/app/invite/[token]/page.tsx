@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getValidSession } from "@/lib/session";
 import { lookupInvitation } from "@/engine/onboarding";
 import { AcceptInvite } from "./accept-invite";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const look = await lookupInvitation(token);
-  const s = await auth();
+  const s = await getValidSession();
   return (
     <main className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md">

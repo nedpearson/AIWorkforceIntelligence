@@ -2,38 +2,31 @@
  * Shared helpers for the collector ingest routes (/api/collect/*).
  * - Bearer-token auth against collectors.token_hash via the ADMIN db handle (the only permitted use
  *   of the admin handle here); every subsequent query is scoped to that collector's orgId.
- * - In-memory per-collector rate limit (60 req/min). Good enough for a single Node process; put a
- *   shared limiter in front of it (Vercel WAF / nginx) for multi-instance deployments.
+ * - Per-collector rate limit (60 req/min) in the shared Postgres limiter (src/lib/rate-limit.ts): holds across
+ *   instances and restarts.
  */
 import { eq, desc, and } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db/client";
 import { sha256 } from "@/lib/crypto";
+import { hit, _resetRateLimitsFor, requestIp } from "@/lib/rate-limit";
 import { DEFAULT_BLOCKED_APPS, DEFAULT_NOTICE_TEXT, DEFAULT_NOTICE_VERSION } from "@/collector-protocol/schema";
 
 export type CollectorRow = typeof schema.collectors.$inferSelect;
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const RATE_LIMIT_PER_MIN = 60;
 
-const buckets = new Map<string, { windowStart: number; count: number }>();
-/** Returns true when the caller is within its budget. Keyed by collector id (or ip for enroll). */
-export function rateLimitOk(key: string, limit = RATE_LIMIT_PER_MIN): boolean {
-  const now = Date.now();
-  const b = buckets.get(key);
-  if (!b || now - b.windowStart >= 60_000) { buckets.set(key, { windowStart: now, count: 1 }); return true; }
-  b.count += 1;
-  if (buckets.size > 10_000) for (const [k, v] of buckets) if (now - v.windowStart > 60_000) buckets.delete(k);
-  return b.count <= limit;
+/** Returns true when the caller is within its budget. Keyed by collector id (or ip for enroll). Postgres-backed. */
+export async function rateLimitOk(key: string, limit = RATE_LIMIT_PER_MIN): Promise<boolean> {
+  return (await hit("collect", key, { limit, windowSec: 60 })).ok;
 }
 /** Test hook. */
-export function _resetRateLimits() { buckets.clear(); }
+export async function _resetRateLimits() { await _resetRateLimitsFor("collect"); }
 
 export const json = (body: unknown, status = 200) => Response.json(body, { status });
 export const err = (status: number, error: string, extra: Record<string, unknown> = {}) => Response.json({ error, ...extra }, { status });
 
-export function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "0.0.0.0";
-}
+export function clientIp(req: Request): string { return requestIp(req); }
 
 /** Parse + validate a JSON body with size guard. Returns a Response on failure. */
 export async function readJson<T>(req: Request, s: z.ZodType<T>): Promise<T | Response> {
@@ -63,7 +56,7 @@ export async function authCollector(req: Request, opts: { allowRevoked?: boolean
   const tokenHash = sha256(m[1].trim());
   const [c] = await db.select().from(schema.collectors).where(eq(schema.collectors.tokenHash, tokenHash)).limit(1);
   if (!c) return err(401, "invalid_token");
-  if (!rateLimitOk(c.id)) return err(429, "rate_limited", { retryAfterSec: 60 });
+  if (!(await rateLimitOk(c.id))) return err(429, "rate_limited", { retryAfterSec: 60 });
   if (c.status === "revoked" && !opts.allowRevoked) return err(403, "collector_revoked");
   if (c.status === "pending") return err(403, "collector_not_enrolled");
   return c;
@@ -94,15 +87,22 @@ export function effectiveConfig(c: Pick<CollectorRow, "config">, campaignCfg?: s
   };
 }
 
-/** Latest consent record state for an employee, evaluated with the admin handle inside the collector's org. */
-export async function consentState(orgId: string, employeeId: string | null): Promise<"acknowledged" | "withdrawn" | "missing"> {
+/**
+ * Consent state for an employee, evaluated with the admin handle inside the collector's org.
+ * With `currentNoticeVersion`, an acknowledgement of an OLDER notice version is "outdated": ingest refuses it until
+ * the employee acknowledges the current notice (docs/SECURITY.md §13, closed in 0005 work).
+ */
+export async function consentState(orgId: string, employeeId: string | null, currentNoticeVersion?: string): Promise<"acknowledged" | "withdrawn" | "missing" | "outdated"> {
   if (!employeeId) return "missing";
-  const [r] = await db.select().from(schema.consentRecords)
+  const rows = await db.select().from(schema.consentRecords)
     .where(and(eq(schema.consentRecords.orgId, orgId), eq(schema.consentRecords.employeeId, employeeId)))
-    .orderBy(desc(schema.consentRecords.createdAt)).limit(1);
+    .orderBy(desc(schema.consentRecords.createdAt)).limit(50);
+  const r = rows[0];
   if (!r) return "missing";
   if (r.withdrawnAt) return "withdrawn";
-  return r.acknowledgedAt ? "acknowledged" : "missing";
+  if (currentNoticeVersion === undefined) return r.acknowledgedAt ? "acknowledged" : "missing";
+  if (rows.some((x) => x.noticeVersion === currentNoticeVersion && x.acknowledgedAt && !x.withdrawnAt)) return "acknowledged";
+  return rows.some((x) => x.acknowledgedAt && !x.withdrawnAt) ? "outdated" : "missing";
 }
 
 /** Campaigns in the org that currently include this employee (running or scheduled with a window). */

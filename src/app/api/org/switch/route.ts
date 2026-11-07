@@ -1,9 +1,8 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { listUserOrgs, ORG_COOKIE } from "@/lib/session";
+import { listUserOrgs, ORG_COOKIE, getValidSession } from "@/lib/session";
 export async function POST(req: Request) {
-  const s = await auth(); if (!s?.user?.id) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  const s = await getValidSession(); if (!s?.user?.id) return Response.json({ error: "unauthenticated" }, { status: 401 });
   const { orgId } = z.object({ orgId: z.string().uuid() }).parse(await req.json());
   const allowed = (await listUserOrgs(s.user.id)).some((o) => o.id === orgId);
   if (!allowed) return Response.json({ error: "forbidden" }, { status: 403 });

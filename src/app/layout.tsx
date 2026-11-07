@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { headers } from "next/headers";
 import { ThemeGuard } from "@/components/theme-guard";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
@@ -15,10 +16,12 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 /** Applies the saved theme before paint (light | dark | present; default follows the OS). */
 const themeScript = `(function(){try{var t=localStorage.getItem('bb-theme');if(!t){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)}catch(e){document.documentElement.setAttribute('data-theme','light')}})()`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // CSP nonce from src/middleware.ts (reading headers() makes every page dynamic, which a per-request nonce requires).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning className={`${inter.variable} ${jakarta.variable}`}>
-      <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
+      <head><script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
       <body className="min-h-screen"><ThemeGuard />{children}</body>
     </html>
   );

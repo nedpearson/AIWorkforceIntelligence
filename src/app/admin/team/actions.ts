@@ -6,6 +6,7 @@ import { withTenant } from "@/db/tenant";
 import { schema } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { createInvitation } from "@/engine/onboarding";
+import { bumpSessionVersion } from "@/lib/sessions";
 import { requireConsultant, appUrl } from "../_lib";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -34,11 +35,13 @@ export async function removeMember(raw: unknown): Promise<Result> {
   const p = z.object({ membershipId: z.string().uuid() }).safeParse(raw); if (!p.success) return { ok: false, error: "invalid" };
   const n = await withTenant(consultancy.id, async (tx) => {
     const [m] = await tx.select({ userId: schema.memberships.userId }).from(schema.memberships).where(and(eq(schema.memberships.id, p.data.membershipId), eq(schema.memberships.orgId, consultancy.id))).limit(1);
-    if (!m || m.userId === ctx.userId) return 0;
-    return (await tx.delete(schema.memberships).where(eq(schema.memberships.id, p.data.membershipId)).returning({ id: schema.memberships.id })).length;
+    if (!m || m.userId === ctx.userId) return null;
+    const removed = (await tx.delete(schema.memberships).where(eq(schema.memberships.id, p.data.membershipId)).returning({ id: schema.memberships.id })).length;
+    return removed ? m.userId : null;
   });
   if (!n) return { ok: false, error: "member not found (you cannot remove yourself)" };
   await audit({ orgId: consultancy.id, actorUserId: ctx.userId, action: "membership.removed", entityType: "membership", entityId: p.data.membershipId });
+  await bumpSessionVersion([n], "membership_removed", { orgId: consultancy.id, actorUserId: ctx.userId });
   revalidatePath("/admin/team"); return { ok: true };
 }
 

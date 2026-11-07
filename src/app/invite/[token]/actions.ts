@@ -1,8 +1,7 @@
 "use server";
 import { z } from "zod";
 import { cookies } from "next/headers";
-import { auth } from "@/lib/auth";
-import { ORG_COOKIE } from "@/lib/session";
+import { ORG_COOKIE, getValidSession } from "@/lib/session";
 import { acceptInvitation, OnboardingError } from "@/engine/onboarding";
 
 type Result = { ok: true; orgId: string; email?: string } | { ok: false; error: string };
@@ -11,7 +10,7 @@ async function setOrgCookie(orgId: string) { (await cookies()).set(ORG_COOKIE, o
 /** Signed-in user accepts (their email must match the invitation). */
 export async function acceptAsExisting(raw: unknown): Promise<Result> {
   const p = z.object({ token: z.string().min(16).max(200) }).safeParse(raw); if (!p.success) return { ok: false, error: "Invalid invitation link." };
-  const s = await auth(); if (!s?.user?.id) return { ok: false, error: "Sign in first." };
+  const s = await getValidSession(); if (!s?.user?.id) return { ok: false, error: "Sign in first." };
   try { const r = await acceptInvitation({ token: p.data.token, mode: "existing", userId: s.user.id }); await setOrgCookie(r.orgId); return { ok: true, orgId: r.orgId }; }
   catch (e) { return { ok: false, error: e instanceof OnboardingError ? e.message : "Could not accept the invitation." }; }
 }

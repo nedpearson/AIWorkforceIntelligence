@@ -1,8 +1,13 @@
 /**
  * Tiny DB-backed job queue on the `jobs` table.
  *  - enqueue(kind, payload, orgId?, runAfter?)
- *  - runPending({ limit }) claims rows with FOR UPDATE SKIP LOCKED (safe across many workers),
- *    runs the registered handler, retries with exponential backoff up to max_attempts.
+ *  - runPending({ limit, ids?, budgetMs? }) claims rows with FOR UPDATE SKIP LOCKED (safe across many workers and
+ *    concurrent cron/after() kicks), runs the registered handler, retries with exponential backoff up to max_attempts.
+ *    Each claim carries a unique lock token; completion only applies while that token still owns the row, so a job
+ *    recovered by requeueStale() and re-run elsewhere is never overwritten by a late finisher (idempotent completion).
+ *    `budgetMs` stops claiming further jobs once the time budget is used (Vercel Hobby functions stop at 60 s).
+ *  - requeueStale(): 'running' rows whose lock is older than JOB_STALE_MINUTES (default 10) go back to 'queued',
+ *    or to 'failed' once attempts are exhausted (a job that always times out cannot loop forever).
  *  - registerJob(kind, fn) adds a handler. Built-ins: retention_sweep, collector_offline_check, analysis.
  * Uses the admin db handle on purpose (system code, see CONVENTIONS). Never import server-only here:
  * scripts/worker.ts runs this under tsx.
@@ -11,6 +16,7 @@ import { and, eq, lt, sql, inArray } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { hostname } from "node:os";
+import { randomBytes } from "node:crypto";
 
 export type JobRow = typeof schema.jobs.$inferSelect;
 export type JobHandler = (payload: Record<string, unknown>, job: JobRow) => Promise<Record<string, unknown> | void>;
@@ -25,51 +31,64 @@ export async function enqueue(kind: string, payload: Record<string, unknown> = {
 }
 
 export const backoffMs = (attempt: number) => Math.min(60 * 60_000, 30_000 * 2 ** Math.max(0, attempt - 1));
-const workerId = () => `${hostname()}:${process.pid}`;
+const lockToken = () => `${hostname()}:${process.pid}:${randomBytes(6).toString("hex")}`;
 
-/** Claim up to `limit` due jobs atomically. Returns the claimed rows (status already 'running'). */
-async function claim(limit: number): Promise<JobRow[]> {
+/** Claim up to `limit` due jobs atomically (optionally only `ids`). Returns the claimed rows (status already 'running'). */
+async function claim(limit: number, ids?: string[]): Promise<JobRow[]> {
+  if (ids && !ids.length) return [];
   return db.transaction(async (tx) => {
     const due = await tx.execute<{ id: string }>(sql`
       select id from jobs where status = 'queued' and run_after <= now()
+      ${ids ? sql`and id in (${sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `)})` : sql``}
       order by run_after asc limit ${limit} for update skip locked`);
-    const ids = [...due].map((r) => r.id);
-    if (!ids.length) return [];
+    const claimed = [...due].map((r) => r.id);
+    if (!claimed.length) return [];
     return tx.update(schema.jobs)
-      .set({ status: "running", lockedAt: new Date(), lockedBy: workerId(), attempts: sql`${schema.jobs.attempts} + 1`, updatedAt: new Date() })
-      .where(inArray(schema.jobs.id, ids)).returning();
+      .set({ status: "running", lockedAt: new Date(), lockedBy: lockToken(), attempts: sql`${schema.jobs.attempts} + 1`, updatedAt: new Date() })
+      .where(inArray(schema.jobs.id, claimed)).returning();
   });
 }
 
-export type RunSummary = { claimed: number; done: string[]; failed: string[]; retried: string[] };
-export async function runPending({ limit = 10 }: { limit?: number } = {}): Promise<RunSummary> {
-  const jobsClaimed = await claim(limit);
-  const out: RunSummary = { claimed: jobsClaimed.length, done: [], failed: [], retried: [] };
-  for (const job of jobsClaimed) {
+export type RunSummary = { claimed: number; done: string[]; failed: string[]; retried: string[]; lost: string[]; budgetExhausted: boolean };
+/** Run due jobs one claim at a time until `limit` jobs ran or `budgetMs` elapsed. */
+export async function runPending({ limit = 10, ids, budgetMs }: { limit?: number; ids?: string[]; budgetMs?: number } = {}): Promise<RunSummary> {
+  const started = Date.now();
+  const out: RunSummary = { claimed: 0, done: [], failed: [], retried: [], lost: [], budgetExhausted: false };
+  while (out.claimed < limit) {
+    if (budgetMs !== undefined && Date.now() - started >= budgetMs) { out.budgetExhausted = true; break; }
+    const [job] = await claim(1, ids);
+    if (!job) break;
+    out.claimed++;
     const fn = registry.get(job.kind);
+    const owned = and(eq(schema.jobs.id, job.id), eq(schema.jobs.status, "running"), eq(schema.jobs.lockedBy, job.lockedBy!));
     try {
       if (!fn) throw new Error(`no handler registered for job kind "${job.kind}"`);
       const result = (await fn(job.payload ?? {}, job)) ?? {};
-      await db.update(schema.jobs).set({ status: "done", result, error: null, lockedAt: null, lockedBy: null, updatedAt: new Date() }).where(eq(schema.jobs.id, job.id));
-      out.done.push(job.id);
+      const upd = await db.update(schema.jobs).set({ status: "done", result, error: null, lockedAt: null, lockedBy: null, updatedAt: new Date() }).where(owned).returning({ id: schema.jobs.id });
+      (upd.length ? out.done : out.lost).push(job.id);
     } catch (e) {
       const msg = e instanceof Error ? `${e.message}\n${e.stack ?? ""}`.slice(0, 4000) : String(e);
       const exhausted = job.attempts >= job.maxAttempts;
-      await db.update(schema.jobs).set({
+      const upd = await db.update(schema.jobs).set({
         status: exhausted ? "failed" : "queued", error: msg, lockedAt: null, lockedBy: null, updatedAt: new Date(),
         runAfter: exhausted ? job.runAfter : new Date(Date.now() + backoffMs(job.attempts)),
-      }).where(eq(schema.jobs.id, job.id));
-      (exhausted ? out.failed : out.retried).push(job.id);
+      }).where(owned).returning({ id: schema.jobs.id });
+      (!upd.length ? out.lost : exhausted ? out.failed : out.retried).push(job.id);
     }
   }
   return out;
 }
 
-/** Jobs stuck in 'running' for longer than `staleMin` (crashed worker) go back to queued. */
-export async function requeueStale(staleMin = 30) {
+export const staleMinutes = (env: Record<string, string | undefined> = process.env) => { const n = Number(env.JOB_STALE_MINUTES); return Number.isFinite(n) && n > 0 ? n : 10; };
+/** Jobs stuck in 'running' longer than `staleMin` (crashed worker / killed function) → queued, or failed when out of attempts. */
+export async function requeueStale(staleMin = staleMinutes()) {
+  const cutoff = new Date(Date.now() - staleMin * 60_000);
+  const stale = and(eq(schema.jobs.status, "running"), lt(schema.jobs.lockedAt, cutoff));
+  const failed = await db.update(schema.jobs).set({ status: "failed", error: sql`coalesce(${schema.jobs.error}, '') || ${`\nstale lock recovered after ${staleMin} min; attempts exhausted`}`, lockedAt: null, lockedBy: null, updatedAt: new Date() })
+    .where(and(stale, sql`${schema.jobs.attempts} >= ${schema.jobs.maxAttempts}`)).returning({ id: schema.jobs.id });
   const r = await db.update(schema.jobs).set({ status: "queued", lockedAt: null, lockedBy: null, updatedAt: new Date() })
-    .where(and(eq(schema.jobs.status, "running"), lt(schema.jobs.lockedAt, new Date(Date.now() - staleMin * 60_000)))).returning({ id: schema.jobs.id });
-  return r.length;
+    .where(stale).returning({ id: schema.jobs.id });
+  return r.length + failed.length;
 }
 
 // ---------- built-in handlers ----------

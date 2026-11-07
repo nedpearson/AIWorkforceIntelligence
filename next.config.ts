@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   serverExternalPackages: ["pdfkit", "postgres"],
-  outputFileTracingIncludes: { "/api/admin/bootstrap": ["./drizzle/**"] },
+  outputFileTracingIncludes: { "/api/admin/bootstrap": ["./drizzle/**"], "/admin/readiness": ["./drizzle/**"] },
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
+  // Content-Security-Policy (nonce) and HSTS are set per request in src/middleware.ts.
   headers: async () => [{
     source: "/(.*)",
     headers: [

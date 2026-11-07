@@ -3,8 +3,9 @@ import { safeEqual } from "@/lib/crypto";
 import { runMigrations } from "@/engine/migrate";
 import { seedDemo } from "@/engine/seed";
 import { audit } from "@/lib/audit";
+import { isProductionRuntime, shouldSeedOnBuild } from "@/lib/runtime-env";
 
-export const maxDuration = 300;
+export const maxDuration = 60; // Vercel Hobby cap; large seeds: use &inline=0 (analysis is enqueued) or run scripts locally
 export const dynamic = "force-dynamic";
 
 /**
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
   try {
     if (step === "migrate") { const r = await runMigrations({ log }); await audit({ actorType: "system", action: "bootstrap.migrate", details: r }); return Response.json({ ok: true, ...r, logs }); }
     if (step === "seed") {
+      // SEC-001: production never seeds the demo unless explicitly enabled (and then never with the README password).
+      if (isProductionRuntime() && !shouldSeedOnBuild()) return Response.json({ error: "demo seeding is disabled in production (set BOOTSTRAP_SEED_DEMO=1 to allow)" }, { status: 403 });
       const days = Number(req.nextUrl.searchParams.get("days") ?? 20);
       const inline = req.nextUrl.searchParams.get("inline") === "1";
       const r = await seedDemo({ days, log, runAnalysisNow: inline });

@@ -100,8 +100,12 @@ jobs:
       - name: Start the production server
         # The server renders in UTC, as on Vercel, while Playwright's browser runs in E2E_TZ (America/Chicago): any
         # date/number formatted without an explicit zone/locale then fails hydration (tests/e2e/hydration.spec.ts).
+        # `next start` is a production runtime: demo (*.demo) logins are refused unless ALLOW_DEMO_LOGINS=1 (SEC-001).
+        # JOBS_KICK_ON_ENQUEUE=0: the collection spec's 20-event campaign must not re-analyse the shared demo org.
         env:
           TZ: UTC
+          ALLOW_DEMO_LOGINS: "1"
+          JOBS_KICK_ON_ENQUEUE: "0"
         run: |
           nohup npm run start > server.log 2>&1 &
           for i in $(seq 1 60); do

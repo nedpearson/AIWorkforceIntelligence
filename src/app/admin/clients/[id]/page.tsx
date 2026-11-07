@@ -7,6 +7,8 @@ import { seatUsage, stripeConfig, planMonthly, PLANS, EXTRA_SEAT_MONTHLY, EXTRA_
 import { requireClient } from "../../_lib";
 import { clientSummary } from "../../_data";
 import { ClientWorkspace, type TabKey, type TabData, type FinSlice } from "@/components/admin/client-workspace";
+/** Server actions on this page may start an analysis job via after() (src/lib/job-kick.ts): Vercel Hobby cap. */
+export const maxDuration = 60;
 
 export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; return { title: `Client ${id.slice(0, 8)} — Consulting Portal` }; }

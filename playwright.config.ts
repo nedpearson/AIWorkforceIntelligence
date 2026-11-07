@@ -48,7 +48,8 @@ export default defineConfig({
       use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } },
     },
   ],
-  webServer: {
+  // With E2E_BASE_URL set the suite targets an already-running server (CI, or a local build on another port).
+  webServer: process.env.E2E_BASE_URL ? undefined : {
     command: "npm run build && npm run start",
     port: 3000,
     reuseExistingServer: true,

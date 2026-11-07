@@ -1,4 +1,6 @@
 "use server";
+import { hit } from "@/lib/rate-limit";
+import { assertBrainQuota } from "@/engine/brain/quota";
 /**
  * AI Brain server actions — zod-validated, permission-checked in code, tenant-scoped, audited (engine functions audit).
  *  read:            workflows:read            (askBrainAction, getDocumentAction)
@@ -31,6 +33,7 @@ export async function pasteTextAction(raw: unknown): Promise<R<{ status: string;
   try {
     const ctx = await ingestCtx();
     const p = Paste.safeParse(raw); if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "invalid input" };
+    await assertBrainQuota(ctx.orgId, Buffer.byteLength(p.data.content, "utf8"));
     const sourceId = await ensureSource(ctx.orgId, "manual", "Pasted text", null, ctx.userId);
     const r = await ingestDocument(ctx.orgId, ctx.userId, { title: p.data.title, content: p.data.content, category: p.data.category, departmentId: p.data.departmentId ?? null, allowedRoles: p.data.allowedRoles, sourceId, supersedesId: p.data.supersedesId ?? null, mimeType: "text/plain" }, { allowNearDuplicate: p.data.allowNearDuplicate });
     done(); return { ok: true, ...r };
@@ -89,6 +92,7 @@ export async function syncSourceAction(key: string): Promise<R<{ message: string
 const Ask = z.object({ question: z.string().trim().min(2).max(500), simulateRole: z.enum(ROLES).optional(), simulateDepartmentId: uuid.nullish() });
 export async function askBrainAction(raw: unknown) {
   const ctx = await requireCtx("workflows:read");
+  if (!(await hit("assistantAsk", ctx.userId)).ok) return { ok: false as const, error: "You're asking very quickly — wait a minute and try again." };
   const p = Ask.safeParse(raw); if (!p.success) return { ok: false as const, error: "Ask a question of at least 2 characters." };
   const scope = await brainScopeFor(ctx.orgId, ctx);
   let role: string = scope.role; let departmentIds = scope.departmentIds; let simulated = false;

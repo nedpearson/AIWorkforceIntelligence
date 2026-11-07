@@ -1,13 +1,24 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { auth, type Ctx } from "./auth";
 import { db, schema } from "@/db/client";
 import { can, type Permission } from "./rbac";
 import { DEFAULT_TIME_ZONE } from "./datetime";
+import { sessionStillValid } from "./sessions";
+import { mfaRequirement, mustEnrollMfa, MFA_ENROLL_PATH, isPlatformOwnerEmail } from "./mfa-policy";
+import { headers } from "next/headers";
 
 export const ORG_COOKIE = "bb_org";
+
+/** auth() plus the server-side revocation check, for callers that need the user but not an org (org switch, invitations). */
+export async function getValidSession() {
+  const s = await auth();
+  if (!s?.user?.id) return null;
+  const [u] = await db.select({ sessionVersion: schema.users.sessionVersion, hasPassword: sql<boolean>`${schema.users.passwordHash} is not null`, ssoSubject: schema.users.ssoSubject }).from(schema.users).where(eq(schema.users.id, s.user.id)).limit(1);
+  return sessionStillValid(s.user.sv, u) ? s : null;
+}
 
 /** Resolve the signed-in user + active org (from cookie, falling back to first membership). */
 export async function getCtx(): Promise<Ctx | null> {
@@ -15,10 +26,12 @@ export async function getCtx(): Promise<Ctx | null> {
   if (!s?.user?.id) return null;
   const c = await cookies();
   const wanted = c.get(ORG_COOKIE)?.value;
-  const rows = await db.select({ orgId: schema.memberships.orgId, role: schema.memberships.role, employeeId: schema.memberships.employeeId, kind: schema.organizations.kind, name: schema.organizations.name, parent: schema.organizations.parentOrgId })
-    .from(schema.memberships).innerJoin(schema.organizations, eq(schema.organizations.id, schema.memberships.orgId))
+  // One query: memberships + the user's session_version / sign-in ability (server-side revocation, src/lib/sessions.ts).
+  const rows = await db.select({ orgId: schema.memberships.orgId, role: schema.memberships.role, employeeId: schema.memberships.employeeId, kind: schema.organizations.kind, name: schema.organizations.name, parent: schema.organizations.parentOrgId, sessionVersion: schema.users.sessionVersion, hasPassword: sql<boolean>`${schema.users.passwordHash} is not null`, ssoSubject: schema.users.ssoSubject, mfaEnabled: schema.users.mfaEnabled, settings: schema.organizations.settings })
+    .from(schema.memberships).innerJoin(schema.organizations, eq(schema.organizations.id, schema.memberships.orgId)).innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
     .where(eq(schema.memberships.userId, s.user.id));
   if (!rows.length) return null;
+  if (!sessionStillValid(s.user.sv, rows[0])) return null;
   let m = rows.find((r) => r.orgId === wanted) ?? rows[0];
   // Consultancy members may act inside any client org they manage (as 'consultant').
   if (wanted && !rows.some((r) => r.orgId === wanted)) {
@@ -26,11 +39,18 @@ export async function getCtx(): Promise<Ctx | null> {
     if (consultancies.length) {
       const [client] = await db.select().from(schema.organizations).where(eq(schema.organizations.id, wanted)).limit(1);
       if (client?.parentOrgId && consultancies.includes(client.parentOrgId)) {
-        m = { orgId: client.id, role: "consultant", employeeId: null, kind: client.kind, name: client.name, parent: client.parentOrgId };
+        m = { ...m, orgId: client.id, role: "consultant", employeeId: null, kind: client.kind, name: client.name, parent: client.parentOrgId, settings: client.settings };
       }
     }
   }
-  return { userId: s.user.id, email: s.user.email, orgId: m.orgId, role: m.role, orgKind: m.kind, orgName: m.name, employeeId: m.employeeId };
+  const mfa = mfaRequirement({ role: m.role, email: s.user.email, orgSettings: m.settings });
+  return { userId: s.user.id, email: s.user.email, orgId: m.orgId, role: m.role, orgKind: m.kind, orgName: m.name, employeeId: m.employeeId, mfaEnabled: rows[0].mfaEnabled, mfaRequired: mfa.required, mfaRequiredReason: mfa.reason };
+}
+
+/** Server-side MFA enrolment gate for page layouts: redirect to the (always reachable) enrolment page. */
+export async function enforceMfaEnrollment(ctx: Ctx) {
+  const path = (await headers()).get("x-bb-path");
+  if (mustEnrollMfa(ctx, path)) redirect(MFA_ENROLL_PATH + "?mfa=required");
 }
 export async function requireCtx(perm?: Permission): Promise<Ctx> {
   const ctx = await getCtx();
@@ -42,6 +62,7 @@ export async function requireCtx(perm?: Permission): Promise<Ctx> {
 export async function requireApiCtx(perm?: Permission): Promise<Ctx | Response> {
   const ctx = await getCtx();
   if (!ctx) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  if (ctx.mfaRequired && !ctx.mfaEnabled) return Response.json({ error: "mfa_enrollment_required", enroll: MFA_ENROLL_PATH }, { status: 403 });
   if (perm && !can(ctx.role, perm)) return Response.json({ error: "forbidden", permission: perm }, { status: 403 });
   return ctx;
 }
@@ -60,4 +81,13 @@ export async function listUserOrgs(userId: string) {
 export async function getOrgTimeZone(orgId: string): Promise<string> {
   const [o] = await db.select({ timezone: schema.organizations.timezone }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1);
   return o?.timezone ?? DEFAULT_TIME_ZONE;
+}
+
+/** Platform owner: OWNER_EMAIL, or an owner of a consultancy organization. Used for operator-only diagnostics. */
+export async function isPlatformOwner(ctxOrNull?: Ctx | null): Promise<boolean> {
+  const ctx = ctxOrNull === undefined ? await getCtx() : ctxOrNull;
+  if (!ctx) return false;
+  if (isPlatformOwnerEmail(ctx.email)) return true;
+  const own = await listUserOrgs(ctx.userId);
+  return own.some((o) => o.kind === "consultancy" && o.role === "owner");
 }

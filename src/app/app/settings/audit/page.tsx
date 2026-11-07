@@ -5,6 +5,7 @@ import { withTenant } from "@/db/tenant";
 import { db, schema } from "@/db/client";
 import { Badge, Empty } from "@/components/ui";
 import { AuditTable } from "./audit-table";
+import { VerifyChain } from "./verify-chain";
 
 export const metadata = { title: "Audit log" };
 export const dynamic = "force-dynamic";
@@ -29,9 +30,10 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   return (
     <div data-testid="audit-page">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-ink-2">{total.toLocaleString("en-US")} entries. Every mutation, sign-in, report and assistant question is recorded here; entries are append-only.</p>
+        <p className="text-xs text-ink-2">{total.toLocaleString("en-US")} entries. Every mutation, sign-in, report and assistant question is recorded here; entries are append-only and hash-chained, so an edited or removed entry is detectable.</p>
         <form className="flex gap-2" method="get"><input name="action" defaultValue={actionFilter} placeholder="Filter by action, e.g. report." className="h-8 rounded-lg border border-border bg-surface px-2 text-xs" data-testid="audit-filter" /><button className="h-8 rounded-lg border border-border px-3 text-xs" data-testid="audit-filter-go">Filter</button></form>
       </div>
+      <VerifyChain />
       {rows.length === 0 ? <Empty title="No audit entries" body={actionFilter ? "Nothing matches that filter." : "Actions will appear here as people use the app."} /> : (
         <AuditTable rows={rows.map((r) => ({ id: r.id, ts: r.ts.toISOString(), actor: r.actorUserId ? (who.get(r.actorUserId) ?? "member") : r.actorType, actorType: r.actorType, action: r.action, entityType: r.entityType, entityId: r.entityId, details: r.details ?? {} }))} />
       )}

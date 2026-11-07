@@ -1,7 +1,8 @@
 /**
  * POST /api/collect/events — ingest a batch of metadata-only activity events.
  * Server-side enforcement (the collector also filters, but the server never trusts it):
- *   - collector must be active and not paused; employee consent must be acknowledged and not withdrawn
+ *   - collector must be active and not paused; employee consent must be acknowledged for the org's CURRENT notice
+ *     version and not withdrawn (an older acknowledgement → dropped as consent_outdated)
  *   - each event must fall inside an active campaign's date range + schedule for this employee
  *   - blocked apps are dropped; titleMode strips titleHash/titleCategory as configured
  *   - meta keys that could carry content are rejected by the schema
@@ -12,11 +13,11 @@ import { db, schema } from "@/db/client";
 import { withTenant } from "@/db/tenant";
 import { EventBatch, type EventBatchResponse } from "@/collector-protocol/schema";
 import { inDateRange, inSchedule } from "@/collector-protocol/schedule";
-import { authCollector, readJson, err, json, isPaused, consentState, campaignsForEmployee, effectiveConfig } from "../_lib";
+import { authCollector, readJson, err, json, isPaused, consentState, campaignsForEmployee, effectiveConfig, noticeFromSettings } from "../_lib";
 
 export const runtime = "nodejs";
 
-type Reason = "collector_paused" | "no_employee" | "consent_missing" | "consent_withdrawn" | "no_active_campaign" | "outside_campaign_window" | "blocked_app" | "future_timestamp";
+type Reason = "collector_paused" | "no_employee" | "consent_missing" | "consent_withdrawn" | "consent_outdated" | "no_active_campaign" | "outside_campaign_window" | "blocked_app" | "future_timestamp";
 
 export async function POST(req: Request) {
   const c = await authCollector(req);
@@ -32,10 +33,11 @@ export async function POST(req: Request) {
 
   if (isPaused(c)) { drop("collector_paused", body.events.length); await touch(); return respond(0); }
   if (!c.employeeId) { drop("no_employee", body.events.length); await touch(); return respond(0); }
-  const consent = await consentState(c.orgId, c.employeeId);
-  if (consent !== "acknowledged") { drop(consent === "withdrawn" ? "consent_withdrawn" : "consent_missing", body.events.length); await touch(); return respond(0); }
+  const [org] = await db.select({ timezone: schema.organizations.timezone, settings: schema.organizations.settings }).from(schema.organizations).where(eq(schema.organizations.id, c.orgId)).limit(1);
+  // Consent must be for the org's CURRENT notice version (an acknowledgement of an older notice is not enough).
+  const consent = await consentState(c.orgId, c.employeeId, noticeFromSettings(org?.settings).version);
+  if (consent !== "acknowledged") { drop(consent === "withdrawn" ? "consent_withdrawn" : consent === "outdated" ? "consent_outdated" : "consent_missing", body.events.length); await touch(); return respond(0); }
 
-  const [org] = await db.select({ timezone: schema.organizations.timezone }).from(schema.organizations).where(eq(schema.organizations.id, c.orgId)).limit(1);
   const tz = org?.timezone ?? "UTC";
   const campaigns = await campaignsForEmployee(c.orgId, c.employeeId);
   if (!campaigns.length) { drop("no_active_campaign", body.events.length); await touch(); return respond(0); }

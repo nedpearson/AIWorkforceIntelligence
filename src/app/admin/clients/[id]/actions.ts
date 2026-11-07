@@ -1,4 +1,5 @@
 "use server";
+import { startJobSoon } from "@/lib/job-kick";
 /** Server actions for the client workspace. Every mutation: zod-validated, consultant-checked, parent-checked, tenant-scoped, audited. */
 import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
@@ -68,6 +69,7 @@ export async function runAnalysisAction(raw: unknown): Promise<Result<{ jobId: s
     if (!ok) return fail("campaign not found");
   }
   const job = await enqueue("analysis", { orgId: client.id, campaignId: p.data.campaignId }, client.id);
+  startJobSoon(job.id);
   await audit({ orgId: client.id, actorUserId: ctx.userId, action: "analysis.enqueued", entityType: "job", entityId: job.id, details: { campaignId: p.data.campaignId, by: "consultant" } });
   revalidate(client.id);
   return { ok: true, jobId: job.id };

@@ -1,4 +1,5 @@
 "use server";
+import { startJobSoon } from "@/lib/job-kick";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireConsultant, appUrl } from "../../_lib";
@@ -30,6 +31,7 @@ export async function createClientAction(raw: unknown): Promise<NewClientResult>
   try {
     const r = await createClientOrg({ consultancyId: consultancy.id, name: p.data.name, industry: p.data.industry, timezone: p.data.timezone, adminEmail: p.data.adminEmail, adminName: p.data.adminName, plan: p.data.plan as "starter" | "growth" | "enterprise", seats: p.data.seats, employees, demo: p.data.demo, actorUserId: ctx.userId, appUrl: appUrl() });
     revalidatePath("/admin");
+    if (r.demo?.analysisJobId) startJobSoon(r.demo.analysisJobId);
     return { ok: true, orgId: r.orgId, inviteUrl: r.inviteUrl, employeesCreated: r.employeesCreated, departmentsCreated: r.departmentsCreated, demo: r.demo ? { events: r.demo.events, collectors: r.demo.collectors } : null };
   } catch (e) { return { ok: false, error: e instanceof OnboardingError ? e.message : `Could not create the client: ${e instanceof Error ? e.message : String(e)}` }; }
 }

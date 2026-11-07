@@ -1,6 +1,8 @@
 import { requireConsultant } from "../../_lib";
 import { NewClientWizard } from "@/components/admin/new-client-wizard";
 import { PLANS, EXTRA_SEAT_MONTHLY, EXTRA_AGENT_MONTHLY } from "@/engine/billing";
+/** Server actions on this page may start an analysis job via after() (src/lib/job-kick.ts): Vercel Hobby cap. */
+export const maxDuration = 60;
 
 export const metadata = { title: "Add client — Consulting Portal" };
 export const dynamic = "force-dynamic";

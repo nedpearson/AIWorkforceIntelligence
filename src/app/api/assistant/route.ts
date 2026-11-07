@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireApiCtx } from "@/lib/session";
+import { hit, tooManyRequests } from "@/lib/rate-limit";
 import { answerQuestion } from "@/engine/assistant";
 import { answerUniversal, saveExchange, latestConversation } from "@/engine/brain/universal";
 
@@ -16,6 +17,8 @@ const Body = z.object({ question: z.string().trim().min(2).max(1000), universal:
 export async function POST(req: Request) {
   const ctx = await requireApiCtx("workflows:read");
   if (ctx instanceof Response) return ctx;
+  const rl = await hit("assistantAsk", ctx.userId);
+  if (!rl.ok) return tooManyRequests(rl, { message: "You're asking very quickly — wait a minute and try again." });
   const p = Body.safeParse(await req.json().catch(() => null));
   if (!p.success) return Response.json({ error: "question is required (2–1000 characters)" }, { status: 400 });
   try {

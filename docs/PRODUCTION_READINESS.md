@@ -1,5 +1,8 @@
 # Production readiness — verified report
 
+> Superseded for release decisions by `docs/LAUNCH_CERTIFICATION.md` and the live Production Readiness Command Center
+> (`/admin/readiness`). The text below is the 2026-11-06 report, with §3/§4 updated for the security branch.
+
 Written 2026-11-06 against commit `ac0775c` plus this doc set. "Verified" means a named automated test exercises the
 behaviour end to end and passed in the last recorded run (`test-results/.last-run.json`: `status: passed`, 0 failed,
 at 22:01 local on the day of writing; unit suites were run by their authors during Phases 2–3 — this document did not
@@ -56,11 +59,15 @@ workflows"); the mapping to spec files is this document's.
 
 ## 3. Known limitations and blockers
 
-**Security / privacy** (details in `docs/SECURITY.md` §13, `docs/PRIVACY.md` §9)
-- No rate limiting on login/MFA; in-memory limiter elsewhere; no CSP/HSTS from the app; no WAF.
-- JWT sessions cannot be revoked; no MFA recovery codes; MFA cannot be required org-wide.
-- Consent gate ignores notice version (UI shows "outdated", ingest still accepts).
-- No per-employee export/erase action; audit log mutable by the admin DB role; `audit()` swallows failures.
+**Security / privacy** (details in `docs/SECURITY.md` §13, `docs/PRIVACY.md` §9; status of every finding in
+`docs/SECURITY_VERIFICATION.md` and live at `/admin/readiness`)
+- *Fixed on `fix/security-readiness` (not yet deployed):* Postgres-backed rate limits on login/MFA/collectors/assistant/
+  skills/uploads; nonce CSP + HSTS; revocable sessions; org-wide MFA requirement (platform owner always); consent gate
+  enforces the current notice version; audit hash chain with verification; demo credentials can no longer be seeded or
+  used in production (SEC-001).
+- Still open: no WAF; no MFA recovery codes; MFA gate does not cover direct server-action calls; audit chain has no
+  external anchor and the admin DB role can rewrite it; `audit()` swallows failures.
+- No per-employee export/erase action.
 - No key-rotation tooling for `VAULT_KEY`.
 
 **Scale / operations**
@@ -90,11 +97,13 @@ In order; items 1–5 are blockers, 6–9 are strongly advised.
    tune `normalize.ts`; confirm idle detection and the Screen Recording flow (roadmap 5.1).
 2. **Sign and notarize the collector binaries** and validate one Intune and one Jamf rollout (5.2). Without this,
    the client's IT will refuse the install.
-3. **Rate-limit login/MFA and move the limiter out of process**; add CSP/HSTS (5.3).
+3. ~~Rate-limit login/MFA and move the limiter out of process; add CSP/HSTS (5.3).~~ Done on
+   `fix/security-readiness`; deploy it.
 4. **Exercise every integration the client will use, live**: n8n with the shipped templates, Stripe test mode end to
    end, OIDC if the client has SSO, Anthropic if LLM mode is sold (5.4).
 5. **Get CI green on GitHub** and run the full unit + e2e suites on the deployment target's Node/Postgres versions.
-6. Move PDFs to object storage (5.5) and enforce consent version + per-employee export/erase (5.6).
+6. Move PDFs to object storage (5.5) and add per-employee export/erase (5.6). (Consent-version enforcement: done on
+   `fix/security-readiness`.)
 7. Fix the Enterprise plan allowance (5.7) before quoting it.
 8. Error tracking, uptime monitoring, a tested backup restore, and a one-page incident runbook (5.8).
 9. Have counsel review the notice/authorization wording for the client's state and the processor agreement

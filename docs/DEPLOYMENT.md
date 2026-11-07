@@ -24,7 +24,15 @@ is the list, `.env` is git- and docker-ignored.
 | `POWER_AUTOMATE_TENANT_ID`, `POWER_AUTOMATE_CLIENT_ID`, `POWER_AUTOMATE_CLIENT_SECRET` | no | Reserved for the Power Automate Process Mining adapter; the adapter reports `license_required` regardless in this build. |
 | `UIPATH_ORG`, `UIPATH_TENANT`, `UIPATH_CLIENT_ID`, `UIPATH_CLIENT_SECRET` | no | Same, UiPath Task Mining. |
 | `MIMICA_API_KEY` | no | Same, Mimica. |
-| `SEED_PASSWORD` | no | Password for seeded demo accounts (`scripts/seed.ts`), default `Demo!Pass123`. Dev only. |
+| `SEED_PASSWORD` | no | Password for seeded demo accounts (`scripts/seed.ts`). Outside production the default is `Demo!Pass123`. In any production runtime (`VERCEL_ENV=production` or `NODE_ENV=production`) the default is refused: it must be ≥ 16 characters, otherwise a random password is generated and never printed (`resolveSeedPassword()` in `src/engine/seed.ts`, SEC-001). |
+| `BOOTSTRAP_SEED_DEMO` | no | `1` seeds the synthetic demo at the end of `npm run build`. Anything else (including unset) never seeds — production builds no longer seed by default (SEC-001). `/api/admin/bootstrap?step=seed` is refused in production without it. |
+| `SKIP_BOOTSTRAP` | no | `1` skips migrations + seed at the end of `npm run build`. |
+| `ALLOW_DEMO_LOGINS` | no | `1` lets `*.demo` and demo-org-only accounts sign in under a production runtime. **CI/e2e only — leave unset in production.** Without it, `authorize()` refuses them and the login page hides the demo hint. |
+| `JOBS_KICK_ON_ENQUEUE` | no | Default on. `0` stops enqueued analysis jobs from starting immediately via `after()`; the cron/worker then runs them. The e2e suite sets `0`. |
+| `JOB_STALE_MINUTES` | no | A `running` job whose lock is older than this is recovered (default 10; `scripts/worker.ts` uses at least 30). Recovered jobs that used all attempts become `failed`. |
+| `JOB_TICK_BUDGET_MS` | no | `/api/jobs/run` stops claiming new jobs after this many ms (default 45000, capped at 55000). |
+| `BRAIN_ORG_QUOTA_BYTES` | no | Per-org AI Brain quota in bytes of stored document text (default 50 MB). |
+| `OWNER_EMAIL`, `OWNER_PASSWORD_HASH` | no | Platform owner ensured on every build (`src/engine/owner.ts`). The OWNER_EMAIL account is always required to enrol MFA (`src/lib/mfa-policy.ts`); a changed hash also revokes all of its sessions. |
 | `WORKER_POLL_MS` | no | `scripts/worker.ts` poll interval, default 5000. |
 | `E2E_BASE_URL`, `E2E_TZ` | no | Playwright target and browser time zone (defaults `http://localhost:3000`, `America/Chicago`). |
 
@@ -58,18 +66,35 @@ openssl rand -hex 32      # CRON_SECRET
   ```
   `rls.sql` is idempotent (DROP POLICY IF EXISTS / CREATE) and must run after **every** schema migration because
   `ALTER DEFAULT PRIVILEGES` only covers new tables and policies are per table. `scripts/migrate.ts` does both.
-- Seeding synthetic demo data into production is optional: `npm run db:seed` (never `db:reset`, which drops the schema).
+- Do **not** seed synthetic demo data into production. If a demo is needed there, set `BOOTSTRAP_SEED_DEMO=1` for one
+  build with a ≥ 16-character `SEED_PASSWORD` — demo logins are still refused unless `ALLOW_DEMO_LOGINS=1` (SEC-001).
+  Never run `db:reset` against production (it drops the schema).
 
 ### 2. Vercel project
 1. Import the repo; framework preset Next.js; Node 22. Build command `npm run build`, no custom output directory.
 2. Environment variables: every **required** row above plus whichever integrations you use, for Production and
    Preview. `AUTH_URL` / `NEXT_PUBLIC_APP_URL` must match the deployed domain.
-3. `vercel.json` (committed) schedules `GET /api/jobs/run` every 5 minutes. Vercel adds `Authorization: Bearer
-   $CRON_SECRET` when the `CRON_SECRET` env var exists; the route accepts that form. Cron frequency below daily
-   requires a Pro plan. The route runs up to 10 jobs per tick within `maxDuration = 60`.
-4. Large tenants: `runAnalysis` on tens of thousands of events can exceed 60 s. Run `npm run worker` on a small VPS or
-   container pointed at the same database (it is safe to run alongside the cron tick).
-5. Add the domain, confirm HSTS is on at the platform (the app does not set it; `docs/SECURITY.md` §8).
+3. **Scheduling (what actually runs).** `vercel.json` schedules `GET /api/jobs/run` **once a day at 09:00 UTC**
+   (`0 9 * * *`) — the most a Vercel **Hobby** project allows (production runs on Hobby). Vercel adds
+   `Authorization: Bearer $CRON_SECRET` when the `CRON_SECRET` env var exists; the route accepts that form. Each tick
+   recovers stale locks, enqueues the housekeeping jobs (retention sweep, collector offline check), sweeps expired
+   rate-limit windows, and runs due jobs until 10 jobs ran or `JOB_TICK_BUDGET_MS` (45 s) elapsed, inside
+   `maxDuration = 60`. Consequences on Hobby: the collector offline check runs daily (collectors can show `active` for
+   up to a day after going silent) and retention deletes run daily.
+   **Analysis does not wait for the cron:** "Run analysis now" (and the onboarding / client-workspace equivalents)
+   enqueue the job and start it right after the response via `after()` (`src/lib/job-kick.ts`), within the page's
+   `maxDuration = 60`. The daily cron is the sweeper for jobs a kick did not finish. Claims use
+   `FOR UPDATE SKIP LOCKED`, completion is guarded by a per-claim lock token, so a kick and the cron never run one job
+   twice. Every-5-minute scheduling needs Vercel Pro (change the cron to `*/5 * * * *`) or an external scheduler
+   calling the endpoint with the Bearer secret.
+4. Large tenants: `runAnalysis` is a single unit of work and is **not chunked**; on tens of thousands of events it can
+   exceed 60 s, the function is killed and the job is recovered as stale (then `failed` after 3 attempts). Run
+   `npm run worker` on a small VPS or container pointed at the same database for such tenants (safe alongside the cron
+   tick and kicks).
+5. Add the domain. The app sends `Strict-Transport-Security` itself when the request arrived over HTTPS
+   (`x-forwarded-proto: https`, which Vercel sets) and a nonce-based `Content-Security-Policy` on every page
+   (`src/middleware.ts`). Behind a self-hosted proxy, make the proxy overwrite `x-forwarded-for` (the login and
+   enrollment rate limits key on it) and set `x-forwarded-proto`.
 
 ### 3. Stripe
 - Webhook endpoint: `https://<your-domain>/api/billing/webhook`, events `checkout.session.completed`,
@@ -188,6 +213,7 @@ Migrations are additive by convention; a release that drops or renames a column 
 backfill → remove in the next release) so that rollback remains possible.
 
 ### Rollback
+Full plan with per-migration rollback SQL and Neon point-in-time restore: `docs/ROLLBACK_PLAN.md`.
 - **App only:** Vercel → promote the previous deployment; Compose → `docker compose up -d` with the previous image
   tag. Safe whenever the schema change was additive.
 - **Schema:** Drizzle has no down migrations. Restore the pre-upgrade dump (above), then redeploy the previous app

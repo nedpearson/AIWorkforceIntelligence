@@ -13,7 +13,8 @@ export async function ensurePlatformOwner(opts: { email: string; passwordHash: s
   const email = opts.email.trim().toLowerCase();
   if (!/^\$2[aby]\$\d{2}\$.{53}$/.test(opts.passwordHash)) throw new Error("OWNER_PASSWORD_HASH must be a bcrypt hash");
   let [u] = await db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1);
-  if (u) { await db.update(schema.users).set({ passwordHash: opts.passwordHash, emailVerified: u.emailVerified ?? new Date(), updatedAt: new Date() }).where(eq(schema.users.id, u.id)); }
+  // A changed password hash also revokes every existing session of the owner (session_version, migration 0005).
+  if (u) { const changed = u.passwordHash !== opts.passwordHash; await db.update(schema.users).set({ passwordHash: opts.passwordHash, emailVerified: u.emailVerified ?? new Date(), updatedAt: new Date(), ...(changed ? { sessionVersion: u.sessionVersion + 1 } : {}) }).where(eq(schema.users.id, u.id)); }
   else { [u] = await db.insert(schema.users).values({ email, name: opts.name ?? "Ned Pearson", passwordHash: opts.passwordHash, emailVerified: new Date() }).returning(); }
   const [consultancy] = await db.select().from(schema.organizations).where(and(eq(schema.organizations.slug, "bridgebox"), eq(schema.organizations.kind, "consultancy"))).limit(1);
   if (!consultancy) { log("owner: no consultancy org yet — skipped memberships"); return { userId: u.id, orgs: 0 }; }

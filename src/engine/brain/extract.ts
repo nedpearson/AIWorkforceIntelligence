@@ -35,6 +35,65 @@ export function detectFormat(name: string, mimeType: string | undefined, bytes: 
   return null;
 }
 
+// ------------------------------------------------------------------ upload hardening
+/** Request-level cap for /api/brain/upload (checked from content-length before the multipart body is parsed). */
+export const MAX_UPLOAD_REQUEST_BYTES = 25 * 1024 * 1024;
+/** docx (zip) guards — the central directory is inspected before mammoth inflates anything. */
+export const DOCX_LIMITS = { maxEntries: 2000, maxUncompressedBytes: 50 * 1024 * 1024, maxRatio: 100 } as const;
+
+/** Strip directories, control/bidi characters and anything outside a conservative set; keep the extension. */
+export function sanitizeFilename(name: string): string {
+  const base = String(name ?? "").split(/[\\/]/).pop() ?? "";
+  const cleaned = base.normalize("NFKC").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/[<>:"|?*]/g, "_").replace(/^\.+/, "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "upload";
+  if (cleaned.length <= 150) return cleaned;
+  const ext = cleaned.match(/\.[a-z0-9]{1,8}$/i)?.[0] ?? "";
+  return cleaned.slice(0, 150 - ext.length) + ext;
+}
+
+/** Text formats must actually be text: no NUL bytes and valid UTF-8 (catches binaries renamed to .txt/.md). */
+export function looksLikeText(bytes: Uint8Array): boolean {
+  const head = bytes.subarray(0, Math.min(bytes.length, 64 * 1024));
+  if (head.includes(0)) return false;
+  try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); return true; } catch { return false; }
+}
+
+export type ZipInspection = { ok: true; entries: number; uncompressed: number; compressed: number; hasDocumentXml: boolean } | { ok: false; reason: string };
+/**
+ * Reads the zip End-Of-Central-Directory + central directory (no decompression) and rejects archives that declare
+ * too many entries, too many uncompressed bytes, an extreme compression ratio, ZIP64 sizes or encryption.
+ * Limitation: these are the sizes the archive DECLARES; a crafted file can under-declare. mammoth/jszip then inflates
+ * fully in memory, bounded by the 10 MB compressed upload cap.
+ */
+export function inspectZip(bytes: Uint8Array, limits: { maxEntries: number; maxUncompressedBytes: number; maxRatio: number } = DOCX_LIMITS): ZipInspection {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) return { ok: false, reason: "not a valid zip archive (no central directory)" };
+  const entries = dv.getUint16(eocd + 10, true);
+  const cdSize = dv.getUint32(eocd + 12, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  if (entries === 0xffff || cdOffset === 0xffffffff) return { ok: false, reason: "ZIP64 archives are not accepted" };
+  if (entries > limits.maxEntries) return { ok: false, reason: `archive has ${entries} entries (limit ${limits.maxEntries})` };
+  if (cdOffset + cdSize > bytes.length) return { ok: false, reason: "corrupt zip central directory" };
+  let p = cdOffset; let uncompressed = 0; let compressed = 0; let hasDocumentXml = false;
+  for (let n = 0; n < entries; n++) {
+    if (p + 46 > bytes.length || dv.getUint32(p, true) !== 0x02014b50) return { ok: false, reason: "corrupt zip central directory" };
+    const flags = dv.getUint16(p + 8, true);
+    const csize = dv.getUint32(p + 20, true); const usize = dv.getUint32(p + 24, true);
+    const nameLen = dv.getUint16(p + 28, true); const extraLen = dv.getUint16(p + 30, true); const commentLen = dv.getUint16(p + 32, true);
+    if (flags & 0x1) return { ok: false, reason: "encrypted archives are not accepted" };
+    if (csize === 0xffffffff || usize === 0xffffffff) return { ok: false, reason: "ZIP64 archives are not accepted" };
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (name === "word/document.xml") hasDocumentXml = true;
+    if (usize > 1024 * 1024 && csize > 0 && usize / csize > limits.maxRatio) return { ok: false, reason: `entry "${name.slice(0, 60)}" expands ${Math.round(usize / csize)}× (limit ${limits.maxRatio}×) — possible zip bomb` };
+    uncompressed += usize; compressed += csize;
+    if (uncompressed > limits.maxUncompressedBytes) return { ok: false, reason: `archive expands to more than ${Math.round(limits.maxUncompressedBytes / 1048576)} MB — possible zip bomb` };
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return { ok: true, entries, uncompressed, compressed, hasDocumentXml };
+}
+
 export const titleFromName = (name: string) => name.replace(/\.[a-z0-9]+$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim() || "Untitled document";
 
 function decodeUtf8(bytes: Uint8Array): string {
@@ -108,12 +167,19 @@ export function jsonToText(raw: string): string {
 
 // ------------------------------------------------------------------ entry point
 export async function extractText(file: { name: string; bytes: Uint8Array; mimeType?: string }): Promise<ExtractResult> {
-  const name = file.name || "upload";
+  const name = sanitizeFilename(file.name || "upload");
   if (file.bytes.byteLength > MAX_UPLOAD_BYTES) throw new ExtractError(`"${name}" is ${(file.bytes.byteLength / 1048576).toFixed(1)} MB — the limit is 10 MB per file.`, "too_large");
   const format = detectFormat(name, file.mimeType, file.bytes);
   if (!format) {
     const ext = name.match(/\.([a-z0-9]+)$/i)?.[1];
     throw new ExtractError(`"${name}" is not a supported file type${ext ? ` (.${ext.toLowerCase()})` : ""} or its contents do not match its extension. Supported: TXT, Markdown, CSV, HTML, JSON, Word (.docx) and PDF.`, "unsupported");
+  }
+  // Magic-byte / content sniffing beyond detectFormat(): text must be text; docx must be a sane Word archive.
+  if (["text", "markdown", "csv", "html", "json"].includes(format) && !looksLikeText(file.bytes)) throw new ExtractError(`"${name}" does not contain plain UTF-8 text (it looks like a binary file renamed to .${name.match(/\.([a-z0-9]+)$/i)?.[1] ?? "txt"}).`, "unsupported");
+  if (format === "docx") {
+    const z = inspectZip(file.bytes);
+    if (!z.ok) throw new ExtractError(`"${name}" was rejected: ${z.reason}.`, "unsupported");
+    if (!z.hasDocumentXml) throw new ExtractError(`"${name}" is a zip archive but not a Word document (no word/document.xml).`, "unsupported");
   }
   let title = titleFromName(name); let text = ""; const warnings: string[] = [];
   try {

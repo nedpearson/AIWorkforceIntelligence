@@ -8,15 +8,32 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db/client";
 import { DEMO_ORG, generateEvents } from "@/engine/synthetic";
 import { sha256, randomToken } from "@/lib/crypto";
+import { DEFAULT_DEMO_PASSWORD, MIN_PRODUCTION_SEED_PASSWORD, isProductionRuntime } from "@/lib/runtime-env";
 import { runAnalysis } from "@/engine/analysis";
 import { ensureDefaultFinancialModel } from "@/engine/finance";
 import { DEFAULT_NOTICE_VERSION } from "@/collector-protocol/schema";
 
 export type SeedResult = { skipped: boolean; events?: number; analysis?: unknown };
+
+export class SeedPasswordError extends Error { constructor(m: string) { super(m); this.name = "SeedPasswordError"; } }
+/**
+ * Password for seeded demo accounts (SEC-001). Outside production: SEED_PASSWORD or the README default.
+ * In any production context (VERCEL_ENV=production or NODE_ENV=production) the README default is refused:
+ * SEED_PASSWORD must be ≥ 16 characters, otherwise a random password is generated and never printed.
+ */
+export function resolveSeedPassword(env: Record<string, string | undefined> = process.env): { password: string; source: "env" | "default" | "random"; printable: boolean } {
+  const given = env.SEED_PASSWORD?.trim() ? env.SEED_PASSWORD : undefined;
+  if (!isProductionRuntime(env)) return given ? { password: given, source: "env", printable: true } : { password: DEFAULT_DEMO_PASSWORD, source: "default", printable: true };
+  if (given) {
+    if (given === DEFAULT_DEMO_PASSWORD) throw new SeedPasswordError("SEED_PASSWORD is the published demo password; refusing to seed it in production");
+    if (given.length < MIN_PRODUCTION_SEED_PASSWORD) throw new SeedPasswordError(`SEED_PASSWORD must be at least ${MIN_PRODUCTION_SEED_PASSWORD} characters in production`);
+    return { password: given, source: "env", printable: false };
+  }
+  return { password: randomToken(24), source: "random", printable: false };
+}
 /** Seeds the synthetic demo. Idempotent: returns {skipped:true} if already seeded. `days` controls event volume. */
 export async function seedDemo(opts: { days?: number; log?: (m: string) => void; runAnalysisNow?: boolean } = {}): Promise<SeedResult> {
   const log = opts.log ?? console.log;
-  const PASSWORD = process.env.SEED_PASSWORD ?? "Demo!Pass123";
   const [existing] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, "bridgebox")).limit(1);
   if (existing) {
     // Already seeded — but make sure the demo client has been analysed (a previous bootstrap may have died mid-way).
@@ -28,7 +45,9 @@ export async function seedDemo(opts: { days?: number; log?: (m: string) => void;
     if (demo) await upgradeDemo(demo.id, log);
     log("already seeded"); return { skipped: true };
   }
-  const passwordHash = await bcrypt.hash(PASSWORD, 10);
+  const pw = resolveSeedPassword();
+  const PASSWORD = pw.printable ? pw.password : pw.source === "random" ? "<random, not printed>" : "<SEED_PASSWORD, not printed>";
+  const passwordHash = await bcrypt.hash(pw.password, 10);
 
   const [consultancy] = await db.insert(schema.organizations).values({ name: "BridgeBox Consulting", slug: "bridgebox", kind: "consultancy", branding: { reportName: "BridgeBox AI Workforce Intelligence", primaryColor: "#0f766e" } }).returning();
   const [owner] = await db.insert(schema.users).values({ email: "owner@bridgebox.demo", name: "Ned Pearson", passwordHash, emailVerified: new Date() }).returning();

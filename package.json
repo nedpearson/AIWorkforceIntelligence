@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "collector:dev": "tsx collector/src/index.ts",
-    "worker": "tsx scripts/worker.ts"
+    "worker": "tsx scripts/worker.ts",
+    "readiness:record": "tsx scripts/readiness-record.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireApiCtx } from "@/lib/session";
+import { hit, tooManyRequests } from "@/lib/rate-limit";
 import { runSkill, getSkillRun } from "@/engine/skills";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +12,8 @@ const Body = z.object({ aiEmployeeId: z.string().uuid(), skillKey: z.string().mi
 export async function POST(req: Request) {
   const ctx = await requireApiCtx("agents:read");
   if (ctx instanceof Response) return ctx;
+  const rl = await hit("skillRun", `${ctx.orgId}:${ctx.userId}`);
+  if (!rl.ok) return tooManyRequests(rl, { message: "Too many skill runs in the last minute — wait and try again." });
   const raw = await req.text();
   if (raw.length > 8_000_000) return Response.json({ error: "Request too large (5 MB file limit)" }, { status: 413 });
   let json: unknown = null; try { json = JSON.parse(raw); } catch { /* handled below */ }

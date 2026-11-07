@@ -5,6 +5,8 @@ import { db, schema } from "@/db/client";
 import { PageHeader } from "@/components/ui";
 import { DEFAULT_NOTICE_TEXT, DEFAULT_NOTICE_VERSION } from "@/collector-protocol/schema";
 import { CollectionClient, type CollectionData } from "./collection-client";
+/** Server actions on this page may start an analysis job via after() (src/lib/job-kick.ts): Vercel Hobby cap. */
+export const maxDuration = 60;
 
 export const metadata = { title: "Data Collection" };
 export const dynamic = "force-dynamic";

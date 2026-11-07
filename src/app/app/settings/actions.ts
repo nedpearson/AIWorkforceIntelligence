@@ -17,6 +17,8 @@ import { encrypt, decrypt, randomToken, sha256 } from "@/lib/crypto";
 import { mfaSecret, mfaUri, mfaVerify } from "@/lib/mfa";
 import { checkConnection } from "@/engine/agents/n8n";
 import type { OrgSettings } from "@/db/schema";
+import { bumpSessionVersion } from "@/lib/sessions";
+import { hit, peek } from "@/lib/rate-limit";
 
 type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 const fail = (error: string): Result<never> => ({ ok: false, error });
@@ -129,6 +131,8 @@ export async function removeMember(raw: unknown): Promise<Result> {
       return m;
     });
     await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "membership.removed", entityType: "membership", entityId: p.data.membershipId, details: { userId: m.userId, role: m.role } });
+    // Revoke the removed user's sessions everywhere (their other memberships stay; they sign in again).
+    await bumpSessionVersion([m.userId], "membership_removed", { orgId: ctx.orgId, actorUserId: ctx.userId });
   } catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
   revalidatePath("/app/settings/members");
   return { ok: true };
@@ -149,34 +153,38 @@ export async function mfaStart(): Promise<Result<{ qrDataUrl: string; manualKey:
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.enrollment_started", entityType: "user", entityId: u.id });
   return { ok: true, qrDataUrl, manualKey: secret };
 }
-export async function mfaConfirm(raw: unknown): Promise<Result> {
+export async function mfaConfirm(raw: unknown): Promise<Result<{ signedOut?: boolean }>> {
   const ctx = await requireCtx();
   const p = z.object({ code: z.string().trim().regex(/^\d{6}$/, "enter the 6-digit code") }).safeParse(raw); if (!p.success) return fail(p.error.issues[0]?.message ?? "invalid code");
   const [u] = await db.select({ id: schema.users.id, mfaSecretEnc: schema.users.mfaSecretEnc, mfaEnabled: schema.users.mfaEnabled }).from(schema.users).where(eq(schema.users.id, ctx.userId)).limit(1);
   if (!u?.mfaSecretEnc) return fail("start enrollment first");
+  if (!(await peek("mfaFailures", u.id)).ok) return fail("too many wrong codes — wait 15 minutes and try again");
   let ok = false; try { ok = await mfaVerify(decrypt(u.mfaSecretEnc), p.data.code); } catch { return fail("could not read the stored secret (VAULT_KEY changed?)"); }
-  if (!ok) { await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.confirm_failed", entityType: "user", entityId: u.id }); return fail("that code is not valid — check the time on your phone and try again"); }
+  if (!ok) { await hit("mfaFailures", u.id); await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.confirm_failed", entityType: "user", entityId: u.id }); return fail("that code is not valid — check the time on your phone and try again"); }
   await db.update(schema.users).set({ mfaEnabled: true, updatedAt: new Date() }).where(eq(schema.users.id, u.id));
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.enabled", entityType: "user", entityId: u.id });
+  await bumpSessionVersion([u.id], "mfa_enabled", { orgId: ctx.orgId, actorUserId: ctx.userId });
   revalidatePath("/app/settings/security");
-  return { ok: true };
+  return { ok: true, signedOut: true };
 }
-export async function mfaDisable(raw: unknown): Promise<Result> {
+export async function mfaDisable(raw: unknown): Promise<Result<{ signedOut?: boolean }>> {
   const ctx = await requireCtx();
   const p = z.object({ password: z.string().min(1), code: z.string().trim().regex(/^\d{6}$/, "enter the 6-digit code") }).safeParse(raw); if (!p.success) return fail(p.error.issues[0]?.message ?? "invalid input");
   const [u] = await db.select().from(schema.users).where(eq(schema.users.id, ctx.userId)).limit(1);
   if (!u) return fail("user not found");
   if (!u.mfaEnabled || !u.mfaSecretEnc) return fail("MFA is not enabled");
+  if (!(await peek("mfaFailures", u.id)).ok) return fail("too many wrong codes — wait 15 minutes and try again");
   if (!u.passwordHash || !(await bcrypt.compare(p.data.password, u.passwordHash))) { await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.disable_failed", entityType: "user", entityId: u.id, details: { reason: "password" } }); return fail("password is incorrect"); }
   let ok = false; try { ok = await mfaVerify(decrypt(u.mfaSecretEnc), p.data.code); } catch { return fail("could not read the stored secret"); }
-  if (!ok) { await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.disable_failed", entityType: "user", entityId: u.id, details: { reason: "code" } }); return fail("that code is not valid"); }
+  if (!ok) { await hit("mfaFailures", u.id); await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.disable_failed", entityType: "user", entityId: u.id, details: { reason: "code" } }); return fail("that code is not valid"); }
   await db.update(schema.users).set({ mfaEnabled: false, mfaSecretEnc: null, updatedAt: new Date() }).where(eq(schema.users.id, u.id));
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.disabled", entityType: "user", entityId: u.id });
+  await bumpSessionVersion([u.id], "mfa_disabled", { orgId: ctx.orgId, actorUserId: ctx.userId });
   revalidatePath("/app/settings/security");
-  return { ok: true };
+  return { ok: true, signedOut: true };
 }
 const PasswordInput = z.object({ current: z.string().min(1), next: z.string().min(10, "use at least 10 characters").max(200), confirm: z.string() }).refine((d) => d.next === d.confirm, { message: "new passwords do not match", path: ["confirm"] });
-export async function changePassword(raw: unknown): Promise<Result> {
+export async function changePassword(raw: unknown): Promise<Result<{ signedOut?: boolean }>> {
   const ctx = await requireCtx();
   const p = PasswordInput.safeParse(raw); if (!p.success) return fail(p.error.issues[0]?.message ?? "invalid input");
   const [u] = await db.select({ id: schema.users.id, passwordHash: schema.users.passwordHash }).from(schema.users).where(eq(schema.users.id, ctx.userId)).limit(1);
@@ -186,7 +194,38 @@ export async function changePassword(raw: unknown): Promise<Result> {
   if (p.data.current === p.data.next) return fail("new password must differ from the current one");
   await db.update(schema.users).set({ passwordHash: await bcrypt.hash(p.data.next, 12), updatedAt: new Date() }).where(eq(schema.users.id, u.id));
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "password.changed", entityType: "user", entityId: u.id });
+  await bumpSessionVersion([u.id], "password_changed", { orgId: ctx.orgId, actorUserId: ctx.userId });
+  return { ok: true, signedOut: true };
+}
+
+/** Org policy: require MFA for owners/admins (and consultants acting here). Owner only; enforced in src/lib/session.ts. */
+export async function setMfaPolicy(raw: unknown): Promise<Result> {
+  const ctx = await requireCtx("org:manage");
+  if (ctx.role !== "owner") return fail("only an owner can change the MFA policy");
+  const p = z.object({ requireMfaForAdmins: z.boolean() }).safeParse(raw); if (!p.success) return fail("invalid input");
+  const before = await withTenant(ctx.orgId, async (tx) => (await tx.select({ settings: schema.organizations.settings }).from(schema.organizations).where(eq(schema.organizations.id, ctx.orgId)).limit(1))[0]);
+  if (!before) return fail("organization not found");
+  const settings: OrgSettings = { ...(before.settings ?? {}), requireMfaForAdmins: p.data.requireMfaForAdmins };
+  await withTenant(ctx.orgId, (tx) => tx.update(schema.organizations).set({ settings, updatedAt: new Date() }).where(eq(schema.organizations.id, ctx.orgId)));
+  await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "mfa.policy_updated", entityType: "organization", entityId: ctx.orgId, details: { from: !!before.settings?.requireMfaForAdmins, to: p.data.requireMfaForAdmins } });
+  revalidatePath("/app/settings/security");
   return { ok: true };
+}
+
+/**
+ * Revoke sessions. scope "me": every session of the signed-in user (including this one).
+ * scope "org": every member of the current organization (owner only) — they all sign in again.
+ */
+export async function signOutAllSessions(raw: unknown): Promise<Result<{ revoked: number }>> {
+  const p = z.object({ scope: z.enum(["me", "org"]) }).safeParse(raw); if (!p.success) return fail("invalid input");
+  const ctx = await requireCtx();
+  if (p.data.scope === "me") { await bumpSessionVersion([ctx.userId], "sign_out_all", { orgId: ctx.orgId, actorUserId: ctx.userId }); return { ok: true, revoked: 1 }; }
+  if (ctx.role !== "owner") return fail("only an owner can sign out everyone in the organization");
+  const members = await withTenant(ctx.orgId, (tx) => tx.select({ userId: schema.memberships.userId }).from(schema.memberships).where(eq(schema.memberships.orgId, ctx.orgId)));
+  const ids = [...new Set([...members.map((m) => m.userId), ctx.userId])];
+  await bumpSessionVersion(ids, "sign_out_org", { orgId: ctx.orgId, actorUserId: ctx.userId });
+  await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "auth.org_sessions_revoked", entityType: "organization", entityId: ctx.orgId, details: { users: ids.length } });
+  return { ok: true, revoked: ids.length };
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -44,7 +44,7 @@ beforeAll(async () => {
   process.env.CRON_SECRET = "test-cron-secret";
   A = await makeOrg("Org A"); B = await makeOrg("Org B"); N = await makeOrg("Org None", { titleMode: "none" });
   orgIds.push(A.orgId, B.orgId, N.orgId);
-  _resetRateLimits();
+  await _resetRateLimits();
 });
 afterAll(async () => {
   await db.delete(schema.activityEvents).where(inArray(schema.activityEvents.orgId, orgIds));
@@ -156,6 +156,22 @@ describe("consent gate + events", () => {
     expect(r.status).toBe(200);
     const [c] = await db.select().from(schema.collectors).where(eq(schema.collectors.id, A.collectorId));
     expect(c.version).toBe("0.1.1");
+  });
+});
+
+describe("consent version (SEC-006)", () => {
+  it("drops events when the employee acknowledged an older notice version; re-acknowledging the current one restores ingest", async () => {
+    // The org publishes notice version 8; employee A acknowledged version 7.
+    await db.update(schema.organizations).set({ settings: { noticeText: "Notice for Org A (revised)", noticeVersion: "8" } as schema.OrgSettings }).where(eq(schema.organizations.id, A.orgId));
+    const r = await post(eventsPOST, "/api/collect/events", { collectorId: A.collectorId, events: [ev(), ev()] }, A.token);
+    expect(await r.json()).toMatchObject({ accepted: 0, dropped: 2, reasons: { consent_outdated: 2 } });
+    const cfg = await (await get(configGET, "/api/collect/config", A.token)).json();
+    expect(cfg.consent).toBe("missing"); // collectors re-prompt with the current notice
+    expect(cfg.notice.version).toBe("8");
+    expect((await post(consentPOST, "/api/collect/consent", { collectorId: A.collectorId, noticeVersion: "8" }, A.token)).status).toBe(200);
+    const r2 = await post(eventsPOST, "/api/collect/events", { collectorId: A.collectorId, events: [ev()] }, A.token);
+    expect((await r2.json()).accepted).toBe(1);
+    expect((await (await get(configGET, "/api/collect/config", A.token)).json()).consent).toBe("acknowledged");
   });
 });
 

@@ -8,7 +8,9 @@ loadEnv();
 if (explicitDbUrl) process.env.DATABASE_URL = explicitDbUrl;
 
 export default defineConfig({
-  test: { environment: "node", include: ["tests/unit/**/*.test.ts"], testTimeout: 120_000, hookTimeout: 120_000, fileParallelism: false },
+  test: { environment: "node", include: ["tests/unit/**/*.test.ts"], testTimeout: 120_000, hookTimeout: 120_000, fileParallelism: false,
+    // next-auth's ESM imports "next/server" without an extension; let Vite resolve it (route tests import the session module).
+    server: { deps: { inline: ["next-auth"] } } },
   resolve: {
     alias: [
       { find: /^server-only$/, replacement: path.resolve(__dirname, "tests/unit/_server-only-stub.ts") },

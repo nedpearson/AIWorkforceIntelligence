@@ -37,8 +37,13 @@ is a React hydration error (#418) that also wipes `<html data-theme>`. This box 
 start the server in UTC locally or such bugs stay invisible:
 
 ```bash
-npm run build && TZ=UTC npm run start          # then: npx playwright test
+npm run build && TZ=UTC ALLOW_DEMO_LOGINS=1 JOBS_KICK_ON_ENQUEUE=0 npm run start   # then: npx playwright test
 ```
+
+`ALLOW_DEMO_LOGINS=1` is required because `next start` is a production runtime, where `*.demo` accounts are refused
+(SEC-001). `JOBS_KICK_ON_ENQUEUE=0` keeps "Run analysis now" in `collection.spec.ts` from immediately re-analysing the
+shared Gulf Coast demo org with its 20-event campaign (production starts such jobs right away via `after()`). To target
+a server on another port set `E2E_BASE_URL` — the config then does not start a server itself.
 
 Format rendered dates with `src/lib/datetime.ts` (`formatDateTime` / `formatDate` / `formatTime` with the org's
 zone from `useTimeZone()` in client components, `getOrgTimeZone()` on the server). `hydration.spec.ts` runs the
@@ -73,6 +78,7 @@ already serving; set `E2E_BASE_URL` to point at another host. The browser runs i
 | `crawl.spec.ts` | Owner, manager, consultancy owner × (1440 light, 1440 dark, 390 light): every nav page → 200, h1, no `Application error`, no console/page errors, no horizontal overflow. On 1440 light it clicks every enabled non-destructive control in `<main>` (≤ 60/page; destructive and state-changing controls skipped — see the file header) and writes `test-results/crawl/crawl-report.json`. "Crawl · AI Workforce modules": every AI Brain tab, every AI-employee profile tab, `/app/workforce/new`, `/app/skills-lab`, the open assistant panel (asked a question) and a tour step — owner × 3 variants + manager; lifecycle/permission/portrait/provisioning controls are never clicked. |
 | `hydration.spec.ts` | Browser in `Pacific/Kiritimati` (UTC+14) against the UTC server: every owner nav page, AI Brain and AI-employee profile tabs, workflow/opportunity/agent detail, approvals, credentials, onboarding and settings sub-pages, and every consulting-portal page and client-workspace tab load with zero page errors / console errors and `<html data-theme>` intact. |
 | `a11y.spec.ts` | axe-core (`wcag2a/2aa/21a/21aa/22aa`) on every nav page for the client owner and consultancy owner, light and dark, plus every AI Brain tab, every profile tab, builder, Skills Lab, the open assistant panel and a tour step; zero serious/critical is the bar. Report: `test-results/a11y/a11y-report.json`. |
+| `security.spec.ts` | Nonce CSP on every owner nav page and the portal with zero CSP violations (theme script still applied); `/api/health` public body is `{ok, version}`; "Sign out all my sessions" revokes a second browser session server-side (then re-saves the bayou state); `/admin/readiness` is 404 for the client owner, manager and Bayou owner, and renders 18 computed gates with no recording buttons, no page errors and axe 0 serious/critical for the consultancy owner. |
 | `reconciliation.spec.ts` | `/app` primary KPIs = `/app/finance` = `/app/savings` to the whole dollar (saved model, Conservative preset, and a temporarily saved custom model); the Excel export from `/app` equals the UI and its sheets add up. |
 | `acceptance-ai-workforce.spec.ts` | Final acceptance scenario (real UI, no mocks): five-entry band + Command Center KPIs → `rec-charlotte` quote equals the bill-entry workflow's hours/week → Meet Charlotte (AI designation, AI intro, monogram) → chat (AI identity, citation, start-demo action) → sandbox `process_invoice` over-threshold sample (10 steps, "Synthetic sample", manual vs automated) → calculator → Start pilot (sandbox-gated) → permission read_only → draft_only → act_with_approval with confirmation; QuickBooks/NetSuite "not built" → live invoice (Gulfline Electrical, PO-24-1194, $7,640 > $5,000) → awaiting_approval → owner approves → succeeded, posted to the BridgeBox AP queue → View my work (steps + approval) → pilot-linked agent → Record measurement → verified tier up on `/app/savings` and `/app`, sandbox $0 → Executive ROI PDF. Trace always on; screenshots of steps 2, 3, 5, 9, 11 in `test-results/acceptance/`. Resets Charlotte through the UI when re-run. |
 | `workforce-helpers.ts` | `ensureCharlotteLive` (UI path to pilot + act_with_approval) and the realistic over-threshold invoice used by the specs. |

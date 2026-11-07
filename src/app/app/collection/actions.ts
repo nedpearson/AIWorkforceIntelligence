@@ -1,4 +1,5 @@
 "use server";
+import { startJobSoon } from "@/lib/job-kick";
 /** Server actions for /app/collection. Every mutation: zod-validated, permission-checked, tenant-scoped, audited. */
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
@@ -158,6 +159,7 @@ export async function runAnalysisNow(raw: unknown): Promise<Result<{ jobId: stri
   const [c] = await withTenant(ctx.orgId, (tx) => tx.select({ id: schema.observationCampaigns.id }).from(schema.observationCampaigns).where(and(eq(schema.observationCampaigns.id, p.data.campaignId), eq(schema.observationCampaigns.orgId, ctx.orgId))).limit(1));
   if (!c) return fail("campaign not found");
   const job = await enqueue("analysis", { orgId: ctx.orgId, campaignId: c.id, requestedBy: ctx.userId }, ctx.orgId);
+  startJobSoon(job.id);
   await audit({ orgId: ctx.orgId, actorUserId: ctx.userId, action: "analysis.requested", entityType: "campaign", entityId: c.id, details: { jobId: job.id } });
   revalidate(); return { ok: true, jobId: job.id };
 }

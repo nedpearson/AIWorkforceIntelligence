@@ -16,6 +16,7 @@ export function LoginForm({ next, ssoEnabled }: { next: string; ssoEnabled: bool
       const code = res.code ?? res.error;
       if (String(code).includes("MFA_REQUIRED")) { setNeedOtp(true); setErr("Enter the 6-digit code from your authenticator app."); return; }
       if (String(code).includes("MFA_INVALID")) { setNeedOtp(true); setErr("That code didn't match. Try again."); return; }
+      if (String(code).includes("RATE_LIMITED")) { setErr("Too many sign-in attempts. Wait 15 minutes and try again."); return; }
       setErr("Email or password is incorrect."); return;
     }
     r.push(next); r.refresh();

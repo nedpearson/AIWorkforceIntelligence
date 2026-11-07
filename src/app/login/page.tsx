@@ -1,5 +1,7 @@
 import { LoginForm } from "./login-form";
+import { demoLoginsAllowed } from "@/lib/runtime-env";
 export const metadata = { title: "Sign in" };
+export const dynamic = "force-dynamic";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   const sp = await searchParams;
   return (
@@ -11,7 +13,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p className="text-sm text-ink-2">AI Workforce Intelligence</p>
         </div>
         <LoginForm next={sp.next ?? "/app"} ssoEnabled={!!process.env.OIDC_ISSUER} />
-        <p className="mt-6 text-center text-[11px] text-ink-3">Demo accounts are listed in README.md. All demo data is synthetic.</p>
+        {/* SEC-001: never advertise demo accounts where they cannot (and must not) sign in. */}
+        {demoLoginsAllowed() && <p className="mt-6 text-center text-[11px] text-ink-3" data-testid="login-demo-hint">Demo accounts are listed in README.md. All demo data is synthetic.</p>}
       </div>
     </main>
   );

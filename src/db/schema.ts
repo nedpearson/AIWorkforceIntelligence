@@ -67,6 +67,8 @@ export type OrgSettings = {
   adoptionRate?: number; // 0..1 default 0.75
   realizationRate?: number; // share of recovered hours that becomes realizable $ (default 0.6)
   idleThresholdSec?: number;
+  /** Require owners/admins (and consultants acting here) to enrol MFA before using the app (src/lib/mfa-policy.ts). */
+  requireMfaForAdmins?: boolean;
 };
 
 export const users = pgTable("users", {
@@ -80,6 +82,8 @@ export const users = pgTable("users", {
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  /** Embedded in every JWT; bumping it revokes all of the user's sessions (src/lib/sessions.ts). */
+  sessionVersion: integer("session_version").notNull().default(0),
   createdAt: ts(), updatedAt: upd(),
 });
 
@@ -854,7 +858,46 @@ export const auditLog = pgTable("audit_log", {
   details: jsonb("details").$type<Record<string, unknown>>().default({}),
   ipHash: text("ip_hash"),
   ts: timestamp("ts", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [index("audit_org_ts").on(t.orgId, t.ts)]);
+  /** Hash chain per org (src/lib/audit.ts). NULL on rows written before migration 0005. */
+  prevHash: text("prev_hash"),
+  hash: text("hash"),
+}, (t) => [index("audit_org_ts").on(t.orgId, t.ts), index("audit_org_id").on(t.orgId, t.id)]);
+
+/** Shared fixed-window rate limiter (src/lib/rate-limit.ts). */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  hits: integer("hits").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, (t) => [index("rate_limits_expires").on(t.expiresAt)]);
+
+/** Release-gate evidence written by `npm run readiness:record` (scripts/readiness-record.ts). */
+export const readinessEvidence = pgTable("readiness_evidence", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  gate: text("gate").notNull(),
+  status: text("status").notNull().$type<"pass" | "fail" | "blocked">(),
+  commitSha: text("commit_sha").notNull(),
+  command: text("command").notNull(),
+  environment: text("environment").notNull(),
+  evidence: text("evidence").notNull(),
+  recordedBy: text("recorded_by").notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index("readiness_evidence_gate").on(t.gate, t.recordedAt)]);
+
+/** Security findings register (synced from src/engine/readiness/findings.ts). */
+export const securityFindings = pgTable("security_findings", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  severity: text("severity").notNull().$type<"critical" | "high" | "medium" | "low" | "info">(),
+  status: text("status").notNull().$type<"open" | "remediated" | "accepted">(),
+  component: text("component").notNull(),
+  summary: text("summary").notNull(),
+  fix: text("fix").notNull(),
+  evidence: text("evidence").notNull(),
+  owner: text("owner").notNull(),
+  nextAction: text("next_action").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const jobs = pgTable("jobs", {
   id: uuid("id").primaryKey().defaultRandom(),

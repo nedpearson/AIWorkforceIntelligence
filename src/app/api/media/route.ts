@@ -4,6 +4,7 @@
  * Max 1 MB; PNG/JPEG/WebP verified by magic bytes.
  */
 import { requireApiCtx } from "@/lib/session";
+import { hit, tooManyRequests } from "@/lib/rate-limit";
 import { can } from "@/lib/rbac";
 import { saveMedia, MAX_MEDIA_BYTES, type MediaKind } from "@/engine/workforce/media";
 
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const ctx = await requireApiCtx();
   if (ctx instanceof Response) return ctx;
+  const rl = await hit("upload", ctx.userId);
+  if (!rl.ok) return tooManyRequests(rl);
   const len = Number(req.headers.get("content-length") ?? 0);
   if (len > MAX_MEDIA_BYTES + 64_000) return Response.json({ error: "Image is larger than 1 MB." }, { status: 413 });
   let form: FormData;

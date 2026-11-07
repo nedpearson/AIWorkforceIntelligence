@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const ip = clientIp(req);
-  if (!rateLimitOk(`enroll:${ip}`, 20)) return err(429, "rate_limited", { retryAfterSec: 60 });
+  if (!(await rateLimitOk(`enroll:${ip}`, 20))) return err(429, "rate_limited", { retryAfterSec: 60 });
   const body = await readJson(req, EnrollRequest);
   if (body instanceof Response) return body;
 

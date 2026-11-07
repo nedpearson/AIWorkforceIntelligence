@@ -58,3 +58,14 @@ CREATE POLICY audit_org ON audit_log USING (org_id = app_current_org()) WITH CHE
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY; ALTER TABLE jobs NO FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS jobs_org ON jobs;
 CREATE POLICY jobs_org ON jobs USING (org_id = app_current_org()) WITH CHECK (org_id = app_current_org());
+-- Platform tables (0005): no tenant policy; the app role sees nothing, the admin handle (owner, NO FORCE) uses them.
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['rate_limits','readiness_evidence','security_findings'] LOOP
+    IF to_regclass(t) IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+      EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t);
+    END IF;
+  END LOOP;
+END $$;

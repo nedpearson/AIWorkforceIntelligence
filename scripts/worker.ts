@@ -4,7 +4,7 @@
  * Safe to run several instances: claims use FOR UPDATE SKIP LOCKED.
  */
 import "dotenv/config";
-import { runPending, requeueStale, enqueue } from "../src/engine/jobs";
+import { runPending, requeueStale, enqueue, staleMinutes } from "../src/engine/jobs";
 import { pg } from "../src/db/client";
 
 const POLL_MS = Number(process.env.WORKER_POLL_MS ?? 5000);
@@ -18,7 +18,7 @@ async function loop() {
       const now = Date.now();
       if (now - lastOffline > 5 * 60_000) { await enqueue("collector_offline_check", {}); lastOffline = now; }
       if (now - lastSweep > 60 * 60_000) { await enqueue("retention_sweep", {}); lastSweep = now; }
-      await requeueStale();
+      await requeueStale(Math.max(staleMinutes(), 30)); // long analyses run here, not under the 60 s function cap
       const s = await runPending({ limit: 10 });
       if (s.claimed) console.log(`[worker] claimed=${s.claimed} done=${s.done.length} retried=${s.retried.length} failed=${s.failed.length}`);
       if (!s.claimed) await new Promise((r) => setTimeout(r, POLL_MS));

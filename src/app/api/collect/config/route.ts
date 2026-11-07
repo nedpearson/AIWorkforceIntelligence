@@ -20,7 +20,8 @@ export async function GET(req: Request) {
   await db.update(schema.collectors).set({ lastSeenAt: new Date() }).where(eq(schema.collectors.id, c.id));
   const res: ConfigResponse = {
     collectorId: c.id, status: c.status, pausedUntil: c.pausedUntil?.toISOString() ?? null, config: cfg, notice: noticeFromSettings(org?.settings),
-    consent: await consentState(c.orgId, c.employeeId),
+    // "outdated" (acknowledged an older notice) is reported as "missing" so existing collectors re-prompt with `notice`.
+    consent: await consentState(c.orgId, c.employeeId, noticeFromSettings(org?.settings).version).then((s) => (s === "outdated" ? "missing" : s)),
     campaigns: campaigns.map((k) => ({ id: k.id, startsAt: k.startsAt?.toISOString() ?? null, endsAt: k.endsAt?.toISOString() ?? null, schedule: k.config?.schedule ? { ...k.config.schedule, tz: k.config.schedule.tz ?? tz } : cfg.schedule, titleMode: k.config?.titleMode })),
   };
   return json(res);
