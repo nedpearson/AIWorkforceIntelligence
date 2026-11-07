@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  # Unit tests and e2e each get their own database on the same Postgres service so the seeded e2e
+  # fixtures are never touched by the unit suites (which delete every `jobs` row in afterAll).
+  PG_USER: bridgebox
+  PG_PASSWORD: bridgebox
+  AUTH_URL: http://localhost:3000
+  NEXT_PUBLIC_APP_URL: http://localhost:3000
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  unit:
+    name: Typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bridgebox
+          POSTGRES_PASSWORD: bridgebox
+          POSTGRES_DB: bridgebox_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bridgebox -d bridgebox_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://bridgebox:bridgebox@localhost:5432/bridgebox_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Generate secrets for this run
+        run: |
+          echo "AUTH_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "VAULT_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "CRON_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Migrate + apply RLS, then seed (tests/unit/assistant.test.ts needs the demo org; it skips without it)
+        run: npm run db:reset
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests (Vitest, real Postgres)
+        run: npx vitest run
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: unit
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bridgebox
+          POSTGRES_PASSWORD: bridgebox
+          POSTGRES_DB: bridgebox
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bridgebox -d bridgebox"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://bridgebox:bridgebox@localhost:5432/bridgebox
+      CI: "true"
+      E2E_BASE_URL: http://localhost:3000
+      E2E_TZ: America/Chicago
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Generate secrets for this run
+        run: |
+          echo "AUTH_SECRET=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "VAULT_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+          echo "CRON_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Reset + seed the demo database
+        run: npm run db:reset
+      - name: Build
+        run: npm run build
+      - name: Start the production server
+        run: |
+          nohup npm run start > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/login >/dev/null; then echo "server up"; exit 0; fi
+            sleep 2
+          done
+          echo "server did not start"; cat server.log; exit 1
+      - name: Playwright (desktop + mobile projects; reuses the running server)
+        run: npx playwright test
+      - name: Upload Playwright report and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            playwright-report
+            test-results
+            server.log
+          retention-days: 7

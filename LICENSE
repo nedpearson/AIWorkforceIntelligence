@@ -1,0 +1,24 @@
+BridgeBox AI Workforce Intelligence
+Copyright (c) 2026 Gerald T. Pearson Jr. / BridgeBox. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL
+
+This software, including its source code, documentation, data models, synthetic
+datasets, designs and all associated materials (the "Software"), is the
+proprietary property of the copyright holder.
+
+No part of the Software may be copied, modified, merged, published, distributed,
+sublicensed, sold, hosted for third parties, reverse engineered or otherwise used
+except under a written agreement signed by the copyright holder. Access to this
+repository does not grant any license, express or implied, to any intellectual
+property.
+
+Third-party components are used under their own licenses (see package.json,
+package-lock.json and collector/package.json); nothing in this notice overrides
+those licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE USE
+OF THE SOFTWARE.
