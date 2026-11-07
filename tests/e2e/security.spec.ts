@@ -110,3 +110,47 @@ test.describe("Production Readiness Command Center", () => {
     expect(errors).toEqual([]);
   });
 });
+
+/**
+ * MFA enrolment gate (regression: production incident 2026-11-07). The /app layout used redirect() for users who must
+ * enrol MFA; Next.js reused that layout segment on the enrolment page and replayed the redirect ~80×/s (blank page).
+ * Uses Bayou Dental (isolated tenant): its owner turns on "Require MFA for owners and admins", which applies to them.
+ */
+test.describe("MFA enrolment gate", () => {
+  test("required user lands on Security without a refresh loop; gated pages bounce there; policy restored", async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: statePath("bayou") });
+    const page = await ctx.newPage();
+    const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
+    let rsc = 0, docs = 0;
+    page.on("request", (r) => { if (r.resourceType() === "document") docs++; else if (r.headers()["rsc"]) rsc++; });
+    try {
+      await page.goto("/app/settings/security");
+      await page.getByTestId("mfa-policy-require").check();
+      await page.getByTestId("mfa-policy-save").click();
+      await expect(page.getByTestId("security-flash")).toContainText("must now set up MFA");
+
+      // Soft (client) navigation into a gated page: must end on the enrolment page via one full load, then go quiet.
+      await page.getByRole("link", { name: "Executive Command Center" }).first().click();
+      await page.waitForURL(/\/app\/settings\/security\?mfa=required/, { timeout: 20_000 });
+      await expect(page.getByTestId("mfa-required-banner")).toBeVisible();
+      await page.waitForTimeout(1500);
+      const r0 = rsc, d0 = docs;
+      await page.waitForTimeout(4000);
+      expect(rsc - r0, "RSC requests while idle on the enrolment page").toBeLessThanOrEqual(2);
+      expect(docs - d0, "document loads while idle on the enrolment page").toBe(0);
+
+      // Fresh sign-in (router.push to /app) and direct loads of gated pages.
+      await page.goto("/app/finance");
+      await expect(page).toHaveURL(/\/app\/settings\/security\?mfa=required/);
+      await page.goto("/admin").catch(() => {});
+      await expect(page.getByTestId("security-page")).toBeVisible();
+      await expect(page.getByTestId("security-mfa")).toBeVisible();
+      expect(errors).toEqual([]);
+    } finally {
+      await page.goto("/app/settings/security?mfa=required");
+      const box = page.getByTestId("mfa-policy-require");
+      if (await box.isChecked()) { await box.uncheck(); await page.getByTestId("mfa-policy-save").click(); await expect(page.getByTestId("security-flash")).toContainText("optional"); }
+      await ctx.close();
+    }
+  });
+});

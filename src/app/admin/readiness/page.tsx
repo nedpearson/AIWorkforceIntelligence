@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { ShieldCheck, ShieldAlert, ShieldQuestion, Ban } from "lucide-react";
 import { getConsultant } from "../_lib";
+import { gateMfaForPage } from "@/lib/session";
 import { canSeeReadiness } from "@/engine/readiness/access";
 import { computeReadiness, type GateStatus, type Overall } from "@/engine/readiness/gates";
 import { runLiveChecks, loadEvidence, loadFindings } from "@/engine/readiness/live";
@@ -30,6 +31,7 @@ const SEV_TONE: Record<string, Tone> = { critical: "danger", high: "danger", med
 export default async function ReadinessPage() {
   const c = await getConsultant();
   if (!c || !canSeeReadiness({ email: c.ctx.email, consultancyRole: c.consultancy.role })) notFound();
+  await gateMfaForPage(c.ctx);
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host");
   const proto = h.get("x-forwarded-proto") ?? (host?.startsWith("localhost") || host?.startsWith("127.") ? "http" : "https");

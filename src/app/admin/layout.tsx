@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { requireConsultant, getConsultant } from "./_lib";
-import { enforceMfaEnrollment } from "@/lib/session";
+import { mfaEnrollmentBlocks } from "@/lib/session";
+import { MfaRedirect } from "@/components/mfa-redirect";
 import { canSeeReadiness } from "@/engine/readiness/access";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { TimeZoneProvider } from "@/components/time-zone";
@@ -14,7 +15,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     const c = await getConsultant();
     if (!c || !canSeeReadiness({ email: c.ctx.email, consultancyRole: c.consultancy.role })) notFound();
   }
-  const { ctx, consultancy } = await requireConsultant();
-  await enforceMfaEnrollment(ctx);
+  const { ctx, consultancy } = await requireConsultant({ skipMfaGate: true });
+  if (await mfaEnrollmentBlocks(ctx)) return <MfaRedirect />;
   return <TimeZoneProvider timeZone={consultancy.timezone}><AdminShell email={ctx.email} role={consultancy.role} consultancyName={consultancy.name} primaryColor={consultancy.branding.primaryColor}>{children}</AdminShell></TimeZoneProvider>;
 }

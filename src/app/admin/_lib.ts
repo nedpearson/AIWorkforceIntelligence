@@ -7,7 +7,7 @@ import "server-only";
  */
 import { redirect, notFound } from "next/navigation";
 import { eq, and } from "drizzle-orm";
-import { getCtx, listUserOrgs } from "@/lib/session";
+import { getCtx, listUserOrgs, gateMfaForPage } from "@/lib/session";
 import { db, schema } from "@/db/client";
 import { assertClientOfConsultancy, OnboardingError } from "@/engine/onboarding";
 import type { Ctx } from "@/lib/auth";
@@ -25,8 +25,10 @@ export async function getConsultant(): Promise<ConsultantCtx | null> {
   const [org] = await db.select({ branding: schema.organizations.branding, timezone: schema.organizations.timezone }).from(schema.organizations).where(eq(schema.organizations.id, c.id)).limit(1);
   return { ctx, consultancy: { id: c.id, name: c.name, role: c.role as ConsultantRole, timezone: org?.timezone ?? DEFAULT_TIME_ZONE, branding: org?.branding ?? {} }, orgs };
 }
-export async function requireConsultant(): Promise<ConsultantCtx> {
+/** Pages: requireConsultant(). The admin layout passes { skipMfaGate: true } (layouts must not redirect for MFA). */
+export async function requireConsultant(opts: { skipMfaGate?: boolean } = {}): Promise<ConsultantCtx> {
   const ctx = await getCtx(); if (!ctx) redirect("/login?next=/admin");
+  if (!opts.skipMfaGate) await gateMfaForPage(ctx);
   const c = await getConsultant(); if (!c) redirect("/app?denied=consultancy");
   return c;
 }

@@ -47,14 +47,27 @@ export async function getCtx(): Promise<Ctx | null> {
   return { userId: s.user.id, email: s.user.email, orgId: m.orgId, role: m.role, orgKind: m.kind, orgName: m.name, employeeId: m.employeeId, mfaEnabled: rows[0].mfaEnabled, mfaRequired: mfa.required, mfaRequiredReason: mfa.reason };
 }
 
-/** Server-side MFA enrolment gate for page layouts: redirect to the (always reachable) enrolment page. */
-export async function enforceMfaEnrollment(ctx: Ctx) {
+/**
+ * Server-side MFA enrolment gate for page layouts. Returns true when the layout must render <MfaRedirect/> instead
+ * of the page. Layouts must NOT call redirect() here: layout segments are reused across client navigations, which
+ * replayed the redirect on the enrolment page itself and looped (see src/components/mfa-redirect.tsx).
+ */
+export async function mfaEnrollmentBlocks(ctx: Ctx): Promise<boolean> {
   const path = (await headers()).get("x-bb-path");
-  if (mustEnrollMfa(ctx, path)) redirect(MFA_ENROLL_PATH + "?mfa=required");
+  return mustEnrollMfa(ctx, path);
 }
-export async function requireCtx(perm?: Permission): Promise<Ctx> {
+/**
+ * Page-level MFA gate: redirect an MFA-required, un-enrolled user to the enrolment page. Safe in PAGES (they re-render
+ * on every navigation, so the redirect can't be replayed). Never call from a layout — use mfaEnrollmentBlocks there.
+ */
+export async function gateMfaForPage(ctx: Ctx) {
+  if (await mfaEnrollmentBlocks(ctx)) redirect(MFA_ENROLL_PATH + "?mfa=required");
+}
+/** Pages: requireCtx(perm). Layouts must pass { skipMfaGate: true } and render <MfaRedirect/> themselves. */
+export async function requireCtx(perm?: Permission, opts: { skipMfaGate?: boolean } = {}): Promise<Ctx> {
   const ctx = await getCtx();
   if (!ctx) redirect("/login");
+  if (!opts.skipMfaGate) await gateMfaForPage(ctx);
   if (perm && !can(ctx.role, perm)) redirect("/app?denied=" + perm);
   return ctx;
 }
