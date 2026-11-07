@@ -222,12 +222,12 @@ Tests: `tests/unit/rate-limit.test.ts` (incl. 50 concurrent hits → counts 1..5
 
 ### Upload hardening (AI Brain, `src/engine/brain/extract.ts`, `quota.ts`)
 Filenames are sanitised (directories, control/bidi characters, reserved characters, leading dots stripped; ≤ 150
-chars). Binary formats must match magic bytes (`%PDF`, `PK\3\4`); text formats (txt, md, csv, html, json) must be
+chars). Binary formats must match magic bytes (`%PDF`, `PK\3\4`); text formats (txt, md, csv, json) must be
 valid UTF-8 without NUL bytes. `.docx` central directories are inspected before mammoth runs: ≤ 2000 entries, ≤ 50 MB
 declared uncompressed, ≤ 100× ratio for entries over 1 MB, no ZIP64, no encryption, must contain `word/document.xml`.
 Declared sizes can be forged; actual inflation is bounded only by the 10 MB compressed cap (SEC-007 residual). Each org
-may store 50 MB of document text (`BRAIN_ORG_QUOTA_BYTES`). Tests: `tests/unit/upload-security.test.ts`. CSV, HTML and
-JSON stay accepted (existing functionality), as text-sniffed formats.
+may store 50 MB of document text (`BRAIN_ORG_QUOTA_BYTES`). Tests: `tests/unit/upload-security.test.ts`. CSV and
+JSON stay accepted as text-sniffed formats; HTML/HTM uploads are rejected (owner decision 2026-11-07 — save web pages as PDF).
 
 ## 10. Collector token lifecycle
 

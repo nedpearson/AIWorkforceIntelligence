@@ -79,7 +79,7 @@ function UploadZone({ data, onDone, onPaste }: { data: BrainData; onDone: () => 
           <Button size="sm" loading={busy} onClick={() => input.current?.click()} data-testid="brain-upload-pick"><Upload size={14} />Choose files</Button>
           <Button size="sm" variant="secondary" onClick={onPaste} data-testid="brain-paste-open"><ClipboardPaste size={14} />Paste text</Button>
         </div>
-        <input ref={input} type="file" multiple hidden accept=".txt,.md,.markdown,.csv,.html,.htm,.json,.docx,.pdf" onChange={(e) => { send(Array.from(e.target.files ?? [])); e.target.value = ""; }} data-testid="brain-upload-input" aria-label="Upload knowledge files" />
+        <input ref={input} type="file" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.docx,.pdf" onChange={(e) => { send(Array.from(e.target.files ?? [])); e.target.value = ""; }} data-testid="brain-upload-input" aria-label="Upload knowledge files" />
       </div>
       <div className="card space-y-2 p-4">
         <div className="text-xs font-bold uppercase tracking-wide text-ink-3">Apply to uploads</div>

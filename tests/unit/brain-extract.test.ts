@@ -35,10 +35,11 @@ describe("brain text extraction", () => {
     expect(r.text).toContain("Row 2: Vendor: Delta Pipe; Terms: 2/10, Net 30; GL: 5020.");
     expect(csvToText("", "x").rows).toBe(0);
   });
-  it("html strips tags, scripts and decodes entities", async () => {
-    const r = await extractText({ name: "sla.html", bytes: enc("<html><head><title>Service SLA</title><style>p{}</style></head><body><h1>Response</h1><script>alert(1)</script><p>Emails &amp; tickets: 4&nbsp;hours.</p><ul><li>Phones</li></ul></body></html>") });
-    expect(r.format).toBe("html"); expect(r.title).toBe("Service SLA");
-    expect(r.text).toContain("# Response"); expect(r.text).toContain("Emails & tickets: 4 hours."); expect(r.text).not.toContain("alert"); expect(r.text).toContain("- Phones");
+  it("rejects HTML uploads; htmlToText still strips tags, scripts and entities", async () => {
+    await expect(extractText({ name: "sla.html", bytes: enc("<html><body><p>x</p></body></html>") })).rejects.toMatchObject({ code: "unsupported" });
+    await expect(extractText({ name: "page", mimeType: "text/html", bytes: enc("<p>x</p>") })).rejects.toMatchObject({ code: "unsupported" });
+    const h = htmlToText("<html><head><title>Service SLA</title><style>p{}</style></head><body><script>alert(1)</script><p>Emails &amp; tickets: 4&nbsp;hours.</p></body></html>");
+    expect(h.title).toBe("Service SLA"); expect(h.text).not.toContain("alert"); expect(h.text).toContain("Emails & tickets");
     expect(htmlToText("<p>a</p><p>b</p>").text).toBe("a\nb");
   });
   it("json flattens to key paths", async () => {

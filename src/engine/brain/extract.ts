@@ -3,12 +3,13 @@
  *
  *  extractText({ name, bytes, mimeType? }) → { title, text, format, mimeType, warnings }
  *
- * Supported: .txt .md .csv (→ readable row text) .html/.htm (tags stripped) .json (flattened key paths) .docx (mammoth) .pdf (unpdf).
+ * Supported: .txt .md .csv (→ readable row text) .json (flattened key paths) .docx (mammoth) .pdf (unpdf).
+ * HTML uploads are rejected (decision 2026-11-07: smallest attack surface; save web pages as PDF). htmlToText is kept for internal use.
  * Anything else is rejected with a clear message. Files over 10 MB are rejected before parsing.
  * Extracted text is UNTRUSTED data: it is stored as document content and only ever reaches a model through isolateUntrusted().
  */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-export const SUPPORTED_EXTENSIONS = ["txt", "md", "markdown", "csv", "html", "htm", "json", "docx", "pdf"] as const;
+export const SUPPORTED_EXTENSIONS = ["txt", "md", "markdown", "csv", "json", "docx", "pdf"] as const;
 export type ExtractFormat = "text" | "markdown" | "csv" | "html" | "json" | "docx" | "pdf";
 export type ExtractResult = { title: string; text: string; format: ExtractFormat; mimeType: string; warnings: string[] };
 
@@ -30,7 +31,7 @@ export function detectFormat(name: string, mimeType: string | undefined, bytes: 
   if (ext === "txt" || (!ext && mimeType === "text/plain")) return "text";
   if (ext === "md" || ext === "markdown" || mimeType === "text/markdown") return "markdown";
   if (ext === "csv" || mimeType === "text/csv") return "csv";
-  if (ext === "html" || ext === "htm" || mimeType === "text/html") return "html";
+  if (ext === "html" || ext === "htm" || mimeType === "text/html") return null;
   if (ext === "json" || mimeType === "application/json") return "json";
   return null;
 }
@@ -172,7 +173,7 @@ export async function extractText(file: { name: string; bytes: Uint8Array; mimeT
   const format = detectFormat(name, file.mimeType, file.bytes);
   if (!format) {
     const ext = name.match(/\.([a-z0-9]+)$/i)?.[1];
-    throw new ExtractError(`"${name}" is not a supported file type${ext ? ` (.${ext.toLowerCase()})` : ""} or its contents do not match its extension. Supported: TXT, Markdown, CSV, HTML, JSON, Word (.docx) and PDF.`, "unsupported");
+    throw new ExtractError(`"${name}" is not a supported file type${ext ? ` (.${ext.toLowerCase()})` : ""} or its contents do not match its extension. Supported: TXT, Markdown, CSV, JSON, Word (.docx) and PDF (save web pages as PDF).`, "unsupported");
   }
   // Magic-byte / content sniffing beyond detectFormat(): text must be text; docx must be a sane Word archive.
   if (["text", "markdown", "csv", "html", "json"].includes(format) && !looksLikeText(file.bytes)) throw new ExtractError(`"${name}" does not contain plain UTF-8 text (it looks like a binary file renamed to .${name.match(/\.([a-z0-9]+)$/i)?.[1] ?? "txt"}).`, "unsupported");
