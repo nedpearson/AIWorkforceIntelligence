@@ -25,7 +25,7 @@ export function HeroSegmented<T extends string>({ label, options, value, onChang
 
 function download(url: string) { const a = document.createElement("a"); a.href = url; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); }
 
-export function ExportMenu({ query, scenario, canPdf, variant = "glass", testid = "cmd-export" }: { query: string; scenario: string; canPdf: boolean; variant?: "glass" | "secondary"; testid?: string }) {
+export function ExportMenu({ query, scenario, canPdf, variant = "glass", testid = "cmd-export" }: { query: string; scenario?: string; canPdf: boolean; variant?: "glass" | "secondary"; testid?: string }) {
   const [open, setOpen] = React.useState(false); const [busy, setBusy] = React.useState<string | null>(null); const [err, setErr] = React.useState<string | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, []);

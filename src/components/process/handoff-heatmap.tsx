@@ -18,12 +18,12 @@ export function HandoffHeatmap({ departments, matrix }: { departments: { key: st
             <tr key={f.key}>
               <th scope="row" className="whitespace-nowrap px-2 py-1 text-left text-[11px] font-semibold text-ink-2">{f.name}</th>
               {toKeys.map((t) => {
-                const m = cell.get(`${f.key}→${t.key}`); const share = m ? m.perWeek / max : 0; const pct = m ? Math.round(12 + 80 * Math.sqrt(share)) : 0;
+                const m = cell.get(`${f.key}→${t.key}`); const share = m ? m.perWeek / max : 0; const pct = m ? Math.round(10 + 45 * Math.sqrt(share)) : 0; // ≤55% indigo: ink text keeps ≥4.5:1 in both themes
                 return (
                   <td key={t.key} className="h-12 min-w-[5.5rem] rounded-lg border border-border px-2 text-center tabular" data-testid={`handoff-${f.key}-${t.key}`}
-                    style={m ? { background: `color-mix(in oklab, var(--color-indigo) ${pct}%, var(--color-surface))`, color: pct > 55 ? "#fff" : "var(--color-ink)" } : undefined}
+                    style={m ? { background: `color-mix(in oklab, var(--color-indigo) ${pct}%, var(--color-surface))`, color: "var(--color-ink)" } : undefined}
                     title={m ? `${f.name} → ${t.name}: ${fmtNum(m.perWeek, 1)} per week (${m.count} observed)` : `${f.name} → ${t.name}: none observed`}>
-                    {m ? <><div className="font-semibold">{fmtNum(m.perWeek, 1)}</div><div className="text-[10px] opacity-80">{f.key === t.key ? "within dept" : "per week"}</div></> : <span className="text-ink-3">—</span>}
+                    {m ? <><div className="font-semibold">{fmtNum(m.perWeek, 1)}</div><div className="text-[10px]">{f.key === t.key ? "within dept" : "per week"}</div></> : <span className="text-ink-3">—</span>}
                   </td>
                 );
               })}

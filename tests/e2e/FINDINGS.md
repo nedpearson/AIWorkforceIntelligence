@@ -3,7 +3,7 @@
 Application issues discovered while writing and running `tests/e2e`. None were patched in app code; each is either
 worked around in the spec with a note, or captured as a `test.fixme` that points here.
 
-## 1. `<Button href>` drops `data-testid` (and every other prop)
+## 1. `<Button href>` drops `data-testid` (and every other prop) — FIXED in Phase A
 
 - **Where:** `src/components/ui/index.tsx`, `Button`:
   `if (href) return <Link href={href} className={cls}>{children}</Link>;` — the rest-props (`...p`) are only spread on
@@ -23,7 +23,7 @@ worked around in the spec with a note, or captured as a `test.fixme` that points
 - **Suggested fix:** `if (href) return <Link href={href} className={cls} {...(p as object)}>{children}</Link>;`
   (filter out button-only props such as `type`/`disabled`).
 
-## 2. "New campaign" default start date is the UTC date, stored as local midnight → events dropped until tomorrow
+## 2. (FIXED in Phase A — the default-dates test passes) "New campaign" default start date is the UTC date, stored as local midnight → events dropped until tomorrow
 
 - **Where:** `src/app/app/collection/collection-client.tsx`, `emptyForm()`:
   `startsAt: new Date().toISOString().slice(0, 10)` (UTC calendar date), later submitted as
@@ -71,3 +71,21 @@ worked around in the spec with a note, or captured as a `test.fixme` that points
   employee it enrolls through the collector API (version `1`), which is what the UI then shows as acknowledged.
 - **Suggested fix:** seed consents with `DEFAULT_NOTICE_VERSION` (or set `settings.noticeVersion = "2026-10-v1"` on the org),
   and decide whether `consentState()` in `src/app/api/collect/_lib.ts` should also require the current version.
+
+## Phase A verification (2026-11-07)
+
+5. **Type filter on /app/opportunities had no options** — `page.tsx` (server) imported `OPP_TYPE_LABEL` from the
+   `"use client"` module `opportunity-card.tsx`, so it received a client-reference proxy and `Object.entries()` was `[]`.
+   Same pattern in `/app/search` (`OPP_STATUS_TONE`, badge tones undefined). Fixed: constants moved to
+   `src/components/dashboard/opportunity-meta.ts` (re-exported from the card). Covered by `opportunities.spec.ts`.
+6. **Excel / PDF exported from /app disagreed with the screen once custom assumptions were saved** — the command center
+   always sent `scenario=expected`, which applies the Expected preset, while the page shows the saved model. Repro: save
+   adoption 50% on /app/finance → /app net $22,715, workbook $42,455. Fixed in `command-center.tsx` (only pin a scenario the
+   user picked) and `generateExecutiveReport` (no scenario → saved model). Covered by `reconciliation.spec.ts`.
+7. **Hidden tooltips widened the page** (`Tooltip`, opacity-0 popover at the right edge → `/admin` 1504 px wide at 1440).
+   Now `display:none` until hover/focus; the info icon is keyboard-focusable and carries the text as its name.
+8. **Accessibility** (axe, 106 page×theme scans): 49 serious/critical page-level failures before → 0 after. See the report.
+9. **Leftover running e2e campaigns captured events** of later runs (events go to the first matching running campaign),
+   making `collection.spec.ts` order-dependent. The spec now completes its own campaigns.
+10. **Crawl hazard**: a select on /app/settings/members saves on change; an unrestricted crawl promoted the seeded manager
+    to owner. The crawl only changes view/filter controls now; the manager row was restored.

@@ -14,27 +14,27 @@ import { cn, fmtNum } from "@/lib/utils";
 const COLLECTED = ["Which application is in front (program name only)", "A coarse document category derived on-device; the window title is discarded", "Time in each app, switches and idle periods — only inside the campaign schedule", "Counts, never contents (fields filled, pastes, clicks)"];
 const NEVER = ["Keystrokes or what you type", "Clipboard contents", "Screenshots or screen recording", "Web addresses (URLs) or page contents", "Window titles, file names or document contents", "Emails, chats or messages", "Camera, microphone or location", "Anything from blocked apps (password managers, banking, health, personal messaging)", "Anything outside the campaign's days and hours, or while paused"];
 
-const SEV_CLS: Record<Severity, string> = { critical: "bg-coral text-white", high: "bg-coral-soft text-coral-ink", medium: "bg-gold-soft text-gold-ink", low: "bg-royal-soft text-royal-ink", ok: "bg-emerald-soft text-emerald-ink" };
+const SEV_CLS: Record<Severity, string> = { critical: "bg-coral-ink text-white dark:bg-coral dark:text-midnight", high: "bg-coral-soft text-coral-ink", medium: "bg-gold-soft text-gold-ink", low: "bg-royal-soft text-royal-ink", ok: "bg-emerald-soft text-emerald-ink" };
 function Sev({ s }: { s: Severity }) { return <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide", SEV_CLS[s])}>{s === "ok" ? "controlled" : s}</span>; }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const tip = (fn: (p: { active?: boolean; label?: string | number; payload?: { value?: number | string }[] }) => React.ReactElement | null) => fn as unknown as any;
 
 function Heatmap({ reg, onPick }: { reg: RiskRegister; onPick: (keys: string[]) => void }) {
   const cell = (l: number, i: number) => reg.heatmap.find((c) => c.likelihood === l && c.impact === i);
-  const tone = (l: number, i: number) => { const s = l * i; return s >= 16 ? "bg-coral/80 text-white" : s >= 9 ? "bg-coral-soft text-coral-ink" : s >= 4 ? "bg-gold-soft text-gold-ink" : "bg-emerald-soft text-emerald-ink"; };
+  const tone = (l: number, i: number) => { const s = l * i; return s >= 16 ? "bg-coral-ink text-white dark:bg-coral dark:text-midnight" : s >= 9 ? "bg-coral-soft text-coral-ink" : s >= 4 ? "bg-gold-soft text-gold-ink" : "bg-emerald-soft text-emerald-ink"; };
   return (
-    <div role="table" aria-label="Risk heatmap: likelihood (rows) by impact (columns); numbers are open register items" className="text-[11px]">
-      <div className="grid grid-cols-[2.25rem_repeat(5,minmax(0,1fr))] gap-1">
+    <div className="text-[11px]">
+      <div role="table" aria-label="Risk heatmap: likelihood (rows) by impact (columns); numbers are open register items" className="grid grid-cols-[2.25rem_repeat(5,minmax(0,1fr))] gap-1">
         {[5, 4, 3, 2, 1].map((l) => (
-          <React.Fragment key={l}>
+          <div role="row" key={l} className="contents">
             <div role="rowheader" className="flex items-center justify-end pr-1 font-semibold text-ink-2">L{l}</div>
             {[1, 2, 3, 4, 5].map((i) => { const c = cell(l, i); return (
-              <button key={i} role="cell" disabled={!c} onClick={() => c && onPick(c.keys)} aria-label={`Likelihood ${l}, impact ${i}: ${c?.count ?? 0} open item(s)`} data-testid={`heat-${l}-${i}`}
-                className={cn("flex h-9 items-center justify-center sm:h-10 rounded-md font-bold transition", tone(l, i), c ? "ring-2 ring-ink/30 hover:scale-105" : "opacity-50")}>{c?.count ?? ""}</button>
+              <div role="cell" key={i} className="contents"><button disabled={!c} onClick={() => c && onPick(c.keys)} aria-label={`Likelihood ${l}, impact ${i}: ${c?.count ?? 0} open item(s)`} data-testid={`heat-${l}-${i}`}
+                className={cn("flex h-9 items-center justify-center sm:h-10 rounded-md font-bold transition", tone(l, i), c ? "ring-2 ring-ink/30 hover:scale-105" : "opacity-50")}>{c?.count ?? ""}</button></div>
             ); })}
-          </React.Fragment>
+          </div>
         ))}
-        <div />{[1, 2, 3, 4, 5].map((i) => <div key={i} className="text-center font-semibold text-ink-2">I{i}</div>)}
+        <div role="row" className="contents"><div role="cell" />{[1, 2, 3, 4, 5].map((i) => <div role="columnheader" key={i} className="text-center font-semibold text-ink-2">I{i}</div>)}</div>
       </div>
       <p className="mt-2 text-ink-3">L = likelihood, I = impact (1–5). Click a cell to filter the register.</p>
     </div>

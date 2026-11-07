@@ -139,7 +139,7 @@ export function AppShell({ ctx, orgs, isDemo, branding, children }: { ctx: Ctx; 
   );
 
   return (
-    <div className="bg-app flex min-h-screen" style={branding.primaryColor ? ({ "--color-brand": branding.primaryColor } as React.CSSProperties) : undefined}>
+    <div className="bg-app flex min-h-screen" style={branding.primaryColor ? ({ "--color-brand": branding.primaryColor, "--color-brand-soft": `color-mix(in oklab, ${branding.primaryColor} 10%, var(--color-surface))` } as React.CSSProperties) : undefined}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-lg focus:bg-royal focus:px-3 focus:py-2 focus:text-white">Skip to content</a>
       <aside className={cn("bg-sidebar sticky top-0 hidden h-screen shrink-0 flex-col transition-[width] lg:flex no-print", collapsed ? "w-[72px]" : "w-[264px]")} data-testid="sidebar">
         {brand}{orgSelect}{nav(false)}
@@ -147,7 +147,7 @@ export function AppShell({ ctx, orgs, isDemo, branding, children }: { ctx: Ctx; 
         {userBox}
       </aside>
       {open && <div className="fixed inset-0 z-40 bg-midnight/60 backdrop-blur-sm lg:hidden" onClick={() => setOpen(false)} />}
-      <aside className={cn("bg-sidebar fixed inset-y-0 left-0 z-50 flex w-[290px] flex-col transition-transform lg:hidden", open ? "translate-x-0" : "-translate-x-full")} data-testid="mobile-sidebar" aria-hidden={!open}>
+      <aside className={cn("bg-sidebar fixed inset-y-0 left-0 z-50 flex w-[290px] flex-col transition-transform lg:hidden", open ? "translate-x-0" : "-translate-x-full")} data-testid="mobile-sidebar" aria-hidden={!open} inert={!open}>
         <div className="flex items-center justify-between pr-3">{brand}<button onClick={() => setOpen(false)} aria-label="Close menu" className="mt-3 rounded-lg p-1.5 text-white hover:bg-white/10"><X size={20} /></button></div>
         {orgSelect}{nav(true)}{userBox}
       </aside>

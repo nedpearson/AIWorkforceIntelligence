@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the app theme (data-theme), not the OS preference — the theme toggle is authoritative. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, [data-theme="present"], [data-theme="present"] *));
+
 /*
  * BridgeBox design system.
  * Palette (official): Midnight #071426 · Royal #2563EB · Electric Purple #8B5CF6 (AI) · Cyan #06B6D4 (automation)
@@ -41,10 +44,10 @@
   --color-border: #e2e8f0;
   --color-ink: #0b1324;
   --color-ink-2: #475569;
-  --color-ink-3: #64748b;
+  --color-ink-3: #56667c; /* ≥4.5:1 on surface, surface-2 and the *-soft tints (was #64748b: 4.34:1 on surface-2) */
 
   /* legacy aliases */
-  --color-brand: #2563eb;
+  --color-brand: #1d4ed8; /* = royal-ink: brand is used as text on brand-soft (4.23:1 at #2563eb) and as a fill under white text */
   --color-brand-2: #6366f1;
   --color-brand-soft: #dbeafe;
   --color-money: #047857;
@@ -77,7 +80,7 @@
   --color-border: #1e3155;
   --color-ink: #eef3fb;
   --color-ink-2: #b4c2d8;
-  --color-ink-3: #8193ad;
+  --color-ink-3: #8fa0b8;
   --color-royal-ink: #93b4ff;
   --color-purple-ink: #c4b5fd;
   --color-cyan-ink: #67e8f9;
@@ -92,7 +95,7 @@
   --color-gold-soft: rgba(245, 158, 11, 0.18);
   --color-coral-soft: rgba(244, 63, 94, 0.18);
   --color-indigo-soft: rgba(99, 102, 241, 0.2);
-  --color-brand: #3b82f6;
+  --color-brand: #2563eb; /* fill under white text: 5.2:1 (was #3b82f6: 3.7:1) */
   --color-brand-soft: rgba(37, 99, 235, 0.18);
   --color-money: #6ee7b7; --color-money-soft: rgba(16, 185, 129, 0.18);
   --color-warn: #fcd34d; --color-warn-soft: rgba(245, 158, 11, 0.18);
@@ -150,3 +153,9 @@ h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
 @media print { .no-print { display: none !important; } body { background: #fff; } }
+
+/* In dark themes `brand` stays a fill colour; as text it reads at the royal-ink tone (≥4.5:1 on surface and brand-soft). */
+:root[data-theme="dark"] .text-brand, :root[data-theme="present"] .text-brand { color: var(--color-royal-ink); }
+/* Gold heatmap cell (command center): alpha follows --heat-k. Dark themes cap the alpha so light text keeps ≥4.5:1. */
+.heat-gold { background: rgba(245, 158, 11, calc(0.1 + 0.85 * var(--heat-k, 0))); }
+:root[data-theme="dark"] .heat-gold, :root[data-theme="present"] .heat-gold { background: rgba(245, 158, 11, calc(0.1 + 0.45 * var(--heat-k, 0))); }

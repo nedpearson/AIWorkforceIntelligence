@@ -15,19 +15,21 @@ test.describe("Opportunities", () => {
     await expect(page.locator("main")).toContainText(/realizable/);
     await expect(page.locator("main")).toContainText(USD_ANYWHERE);
 
-    // Filter by type
+    // Filter by type (server-side via the ?type= URL param; the FilterBar select drives it)
     const typeSelect = page.getByTestId("opp-filter-type");
-    const types = await typeSelect.locator("option[value]:not([value=''])").evaluateAll((os) => os.map((o) => ({ value: (o as HTMLOptionElement).value, label: o.textContent ?? "" })));
+    const types = await typeSelect.locator("option:not([value=''])").evaluateAll((os) => os.map((o) => ({ value: (o as HTMLOptionElement).value, label: o.textContent ?? "" })));
+    expect(types.length, "Type filter lists the opportunity types").toBeGreaterThanOrEqual(4);
     let picked: { value: string; label: string } | null = null;
-    for (const t of types) { if (await cards.filter({ hasText: t.label }).count()) { picked = t; break; } }
+    for (const t of types) { if (await cards.filter({ has: page.locator("span", { hasText: new RegExp(`^${t.label}$`, "i") }) }).count()) { picked = t; break; } }
     expect(picked, "at least one type has opportunities").not.toBeNull();
     await typeSelect.selectOption(picked!.value);
-    await expect.poll(async () => cards.count()).toBeLessThanOrEqual(total);
+    await page.waitForURL(new RegExp(`[?&]type=${picked!.value}`));
+    await expect.poll(async () => cards.count()).toBeLessThan(total);
     const n = await cards.count();
     expect(n).toBeGreaterThan(0);
-    for (let i = 0; i < n; i++) await expect(cards.nth(i)).toContainText(picked!.label);
-    await expect(page.locator("main")).toContainText(`${n} of ${total}`);
-    await typeSelect.selectOption("");
+    for (let i = 0; i < n; i++) await expect(cards.nth(i)).toContainText(picked!.label, { ignoreCase: true });
+    await expect(page.getByTestId("opp-count")).toHaveText(`${n} of ${total}`);
+    await page.getByTestId("opp-filter-clear").click();
     await expect.poll(async () => cards.count()).toBe(total);
 
     // Open rank 1

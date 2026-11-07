@@ -10,14 +10,15 @@ const href = (r: DeptRow) => (r.id ? `/app/departments/${r.id}` : "/app/employee
 
 /** Heatmap cell: one hue (brand), opacity = share of all recoverable hours (sequential scale). */
 function HeatCell({ r, share }: { r: DeptRow; share: number }) {
-  const alpha = share <= 0 ? 0.06 : 0.15 + 0.85 * Math.sqrt(share);
-  const dark = alpha > 0.55;
+  // Capped at 55% brand so ink text keeps ≥4.5:1 in both themes (white-on-mid-blue tiles were 2.2–3:1).
+  const alpha = share <= 0 ? 0.06 : 0.12 + 0.43 * Math.sqrt(share);
+  const dark = false;
   return (
     <Link href={href(r)} data-testid={`heat-${r.id ?? "unassigned"}`} className="group relative flex min-h-[112px] flex-col justify-between rounded-xl border border-border p-3 transition hover:shadow-pop" style={{ background: `color-mix(in oklab, var(--color-brand) ${Math.round(alpha * 100)}%, var(--color-surface))` }}>
       <div className={cn("text-sm font-semibold", dark ? "text-white" : "text-ink")}>{r.name}</div>
       <div>
         <div className={cn("text-2xl font-semibold tabular", dark ? "text-white" : "text-ink")}>{fmtNum(r.recoverableHoursPerWeek, 0)}<span className="text-xs font-normal opacity-80"> hrs/wk</span></div>
-        <div className={cn("text-[11px]", dark ? "text-white/85" : "text-ink-2")}>{fmtPct(share)} of recoverable · {r.employees} people · {r.opportunities} opp{r.opportunities === 1 ? "" : "s"}</div>
+        <div className={cn("text-[11px]", dark ? "text-white/85" : "text-ink")}>{fmtPct(share)} of recoverable · {r.employees} people · {r.opportunities} opp{r.opportunities === 1 ? "" : "s"}</div>
       </div>
     </Link>
   );

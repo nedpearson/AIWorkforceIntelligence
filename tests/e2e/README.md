@@ -15,6 +15,11 @@ are visible in the database through the UI (reloads after mutations, cross-role 
 
 ## Running
 
+The crawl alone takes ~45–60 min on a 2-vCPU box: `npx playwright test --grep-invert "Crawl"` for the fast path. Never run two Playwright processes at once — they share `test-results/` and delete each other's traces.
+
+Performance baseline (not part of the suite): `npx tsx tests/perf/perf.ts` — see `docs/PERFORMANCE.md`.
+
+
 ```bash
 npm run db:reset              # once, for a clean seed (optional afterwards — see "Re-runnable")
 npm run test:e2e              # = npx playwright test (builds + starts the app if nothing listens on :3000)
@@ -48,6 +53,10 @@ already serving; set `E2E_BASE_URL` to point at another host. The browser runs i
 | `tenant-isolation.spec.ts` | Bayou Dental owner: own org only, empty workflows, 404 for Gulf Coast workflow/opportunity/employee(/agent) ids and report API, no org switcher, cannot forge `/api/org/switch`; Gulf Coast owner reaches the same ids; consultancy owner switches orgs via the switcher. |
 | `assistant-search.spec.ts` | `/app/search?q=invoice` returns workflow hits that open; assistant answers "What is our top opportunity?" with an opportunity citation that resolves. |
 | `admin-portal.spec.ts` | Portfolio shows both demo clients with projected/verified `$`; all 10 client-workspace tabs load; create a project; billing says "Stripe is not configured" with the env var names and checkout refuses honestly; team page lists members. |
+| `nav-map.ts` | Static copy of the sidebar (`NAV_GROUPS`): testid → path → h1 → roles, plus the documented benign console patterns. `nav.spec.ts` and `crawl.spec.ts` assert the rendered sidebar equals it. |
+| `crawl.spec.ts` | Owner, manager, consultancy owner × (1440 light, 1440 dark, 390 light): every nav page → 200, h1, no `Application error`, no console/page errors, no horizontal overflow. On 1440 light it clicks every enabled non-destructive control in `<main>` (≤ 60/page; destructive and state-changing controls skipped — see the file header) and writes `test-results/crawl/crawl-report.json`. |
+| `a11y.spec.ts` | axe-core (`wcag2a/2aa/21a/21aa/22aa`) on every nav page for the client owner and consultancy owner, light and dark; zero serious/critical is the bar. Report: `test-results/a11y/a11y-report.json`. |
+| `reconciliation.spec.ts` | `/app` primary KPIs = `/app/finance` = `/app/savings` to the whole dollar (saved model, Conservative preset, and a temporarily saved custom model); the Excel export from `/app` equals the UI and its sheets add up. |
 | `FINDINGS.md` | Application bugs found by the suite, with repro steps. |
 
 ## Re-runnable without reseeding

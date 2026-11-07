@@ -2,7 +2,7 @@ import { requireCtx } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import type { CalcTree } from "@/db/schema";
 import { analyzeOpportunities, type OppFilters } from "@/engine/opportunity-score";
-import { OPP_TYPE_LABEL } from "@/components/dashboard/opportunity-card";
+import { OPP_TYPE_LABEL } from "@/components/dashboard/opportunity-meta";
 import { OpportunityCenter, type CenterRow, type CenterKpis } from "./opportunity-center";
 
 export const metadata = { title: "AI Opportunity Center" };
@@ -45,11 +45,11 @@ export default async function OpportunitiesPage({ searchParams }: { searchParams
   const deptName = new Map(a.options.departments.map((d) => [d.id, d.name]));
   const filterDefs = [
     { key: "dept", label: "Department", options: a.options.departments.map((d) => ({ value: d.id, label: d.name })) },
-    { key: "bu", label: "Business unit", options: a.options.businessUnits.map((d) => ({ value: d.id, label: d.name })) },
+    { key: "bu", label: "Business unit", all: "All business units", options: a.options.businessUnits.map((d) => ({ value: d.id, label: d.name })) },
     { key: "loc", label: "Location", options: a.options.locations.map((d) => ({ value: d.id, label: d.name })) },
-    { key: "status", label: "Status", options: STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })) },
-    { key: "risk", label: "Risk", options: [{ value: "low", label: "Low risk (< 35)" }, { value: "medium", label: "Medium risk (35–59)" }, { value: "high", label: "High risk (≥ 60)" }] },
-    { key: "type", label: "Type", options: Object.entries(OPP_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
+    { key: "status", label: "Status", all: "All statuses", options: STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })) },
+    { key: "risk", label: "Risk", all: "Any risk", options: [{ value: "low", label: "Low risk (< 35)" }, { value: "medium", label: "Medium risk (35–59)" }, { value: "high", label: "High risk (≥ 60)" }] },
+    { key: "type", label: "Type", all: "All types", options: Object.entries(OPP_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
   ];
   return (
     <OpportunityCenter rows={rows} totalCount={a.all.length} kpis={kpis} filterDefs={filterDefs} splits={a.splits}

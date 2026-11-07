@@ -25,6 +25,11 @@ export default defineConfig({
     // The demo organizations live in America/Chicago; run the browser there so date pickers behave as a real client would see them.
     timezoneId: process.env.E2E_TZ ?? "America/Chicago",
     navigationTimeout: 45_000,
+    // The CI/sandbox box has ~6 GB usable RAM: keep Chromium to a single renderer process.
+    launchOptions: { args: ["--renderer-process-limit=1"] },
+    // KPI values count up from 0 (AnimatedNumber); with reduced motion they render final values immediately, so
+    // assertions never read a mid-animation number.
+    contextOptions: { reducedMotion: "reduce" },
   },
   projects: [
     { name: "setup", testMatch: /auth\.setup\.ts/ },

@@ -145,7 +145,7 @@ export function TransformationClient({ cap, canSubmit }: { cap: CapacityResult; 
                 {r.tasks.slice(0, 5).map((t) => (
                   <li key={t.workflowId} className="text-xs">
                     <div className="flex justify-between gap-2"><Link href={`/app/workflows/${t.workflowId}`} className="truncate font-medium hover:text-royal-ink hover:underline">{t.workflow}</Link><span className="shrink-0 tabular text-ink-2">{fmtPct(t.shareOfRole)} of role</span></div>
-                    {t.opportunityId ? <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-purple-ink"><Bot size={11} />{t.solution ?? OPP_TYPE_LABEL[t.type ?? ""]}<span className="text-ink-3">· {fmtNum(t.recoverableHoursPerWeek, 1)} h/wk · <Link href={`/app/opportunities/${t.opportunityId}`} className="text-royal-ink hover:underline">report</Link></span></div>
+                    {t.opportunityId ? <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-purple-ink"><Bot size={11} />{t.solution ?? OPP_TYPE_LABEL[t.type ?? ""]}<span className="text-ink-3">· {fmtNum(t.recoverableHoursPerWeek, 1)} h/wk · <Link href={`/app/opportunities/${t.opportunityId}`} className="text-royal-ink underline underline-offset-2">report</Link></span></div>
                       : <div className="mt-0.5 text-[11px] text-ink-3">Stays with the role (no automation opportunity)</div>}
                   </li>
                 ))}

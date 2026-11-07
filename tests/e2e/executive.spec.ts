@@ -1,73 +1,97 @@
 import { test, expect, USD_ANYWHERE } from "./fixtures";
+import { EXEC_H1 } from "./nav-map";
 
-test.describe("Executive summary", () => {
-  test("hero KPIs show computed dollar values and each opens a drill-down with basis chips and formulas", async ({ ownerPage: page }) => {
+const dollars = (s: string) => { const m = s.match(/-?\$([\d.,]+)\s?([KMB])?/); if (!m) return NaN; const n = Number(m[1].replace(/,/g, "")); return n * (m[2] === "K" ? 1e3 : m[2] === "M" ? 1e6 : m[2] === "B" ? 1e9 : 1); };
+
+test.describe("Executive Command Center", () => {
+  test("primary KPIs show computed dollar values and each opens a drill-down with a basis chip and a formula tree", async ({ ownerPage: page }) => {
     await page.goto("/app");
+    await expect(page.getByRole("heading", { level: 1, name: EXEC_H1 })).toBeVisible();
     await expect(page.getByTestId("executive-summary")).toBeVisible();
-    await expect(page.locator("main")).not.toContainText("No analysis yet");
+    await expect(page.getByTestId("cmd-setup")).toHaveCount(0); // seeded org has data → no setup banner
 
-    // 1. Spent on automatable work today — must be a real $ amount > 0
-    const wasted = page.getByTestId("kpi-wasted");
-    await expect(wasted).toContainText(USD_ANYWHERE);
-    expect(Number((await wasted.innerText()).match(/\$([\d,]+)/)![1].replace(/,/g, ""))).toBeGreaterThan(0);
-    // 2. Realistically achievable per year — $ amount > 0
-    const achievable = page.getByTestId("kpi-achievable");
-    await expect(achievable).toContainText(USD_ANYWHERE);
-    expect(Number((await achievable.innerText()).match(/\$([\d,]+)/)![1].replace(/,/g, ""))).toBeGreaterThan(0);
-    // 3. Verified so far — either a measured $ amount or the honest empty state with a working CTA (never a placeholder)
+    for (const tid of ["kpi-labor", "kpi-opportunity", "kpi-net"]) {
+      const kpi = page.getByTestId(tid);
+      await expect(kpi).toContainText(USD_ANYWHERE);
+      expect(dollars(await kpi.innerText()), `${tid} is a positive $ amount`).toBeGreaterThan(0);
+    }
+    // Verified: a measured $ amount with its measurement count, or the honest empty state (never a placeholder)
     const verified = page.getByTestId("kpi-verified");
     const vText = await verified.innerText();
     if (USD_ANYWHERE.test(vText)) expect(vText).toMatch(/\d+ measurements?/);
-    else { expect(vText).toContain("No deployments measured yet"); await expect(verified.getByTestId("kpi-verified-cta")).toHaveAttribute("href", /\/app\/(opportunities|agents\/new)/); }
+    else { expect(vText).toContain("Not yet measured"); expect(vText).toMatch(/Deploy an agent|Record a measurement/); }
 
-    for (const [tid, label] of [["kpi-wasted", "Spent on automatable work today"], ["kpi-achievable", "Realistically achievable per year"], ["kpi-verified", "Verified so far"]] as const) {
+    const drills: [string, RegExp][] = [["kpi-labor", /Annual labor expense/], ["kpi-opportunity", /Automation opportunity/], ["kpi-net", /Projected net savings/], ["kpi-verified", /Verified savings/], ["kpi-hours", /Recoverable hours/], ["kpi-roi", /first-year ROI/i]];
+    for (const [tid, title] of drills) {
       await page.getByTestId(tid).click();
-      const modal = page.getByTestId("drilldown-modal");
-      await expect(modal).toBeVisible();
-      await expect(page.getByRole("dialog")).toContainText(label);
-      await expect(modal).toContainText(/Based on \d+ observed, \d+ estimated and \d+ assumed inputs/);
-      // basis chips rendered by <BasisChip>
-      expect(await modal.locator("span", { hasText: /^(observed|estimated|assumed)$/ }).count()).toBeGreaterThan(0);
-      // at least one formula line (monospace) with an operator in it
-      const formulas = modal.locator(".font-mono");
-      expect(await formulas.count()).toBeGreaterThan(0);
-      await expect(formulas.first()).toContainText(/[×÷+\-=Σ]/);
-      await page.getByRole("dialog").getByLabel("Close").click();
-      await expect(modal).toHaveCount(0);
+      const drawer = page.getByTestId("drill-drawer");
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("heading", { level: 2 })).toHaveText(title);
+      await expect(drawer).toContainText("What this means");
+      expect(await drawer.locator("span", { hasText: /^(observed|estimated|assumed)$/i }).count(), `${tid}: basis chip`).toBeGreaterThan(0);
+      const formulas = page.getByTestId("drill-tree").locator(".font-mono");
+      expect(await formulas.count(), `${tid}: formula lines`).toBeGreaterThan(0);
+      await expect(formulas.first()).toContainText(/[×÷+\-−=Σ]/); // − is U+2212 (typographic minus)
+      await drawer.getByLabel("Close").click();
+      await expect(drawer).toHaveCount(0);
     }
   });
 
-  test("all four charts render SVG with plotted data", async ({ ownerPage: page }) => {
+  test("savings waterfall and heatmap are drawn from data and drill into calculations / opportunities", async ({ ownerPage: page }) => {
     await page.goto("/app");
-    for (const tid of ["chart-waterfall", "chart-departments", "chart-three-year", "chart-before-after"]) {
-      const frame = page.getByTestId(tid);
-      await expect(frame).toBeVisible();
-      await expect(frame.locator("svg.recharts-surface").first()).toBeVisible();
-      await expect(frame.locator("ul[aria-label='Legend'] li").first()).toBeVisible();
-      await expect(frame).not.toContainText("No department data yet");
-      // bars (rect) or lines (path) were actually drawn
-      expect(await frame.locator("svg .recharts-bar-rectangle, svg .recharts-line-curve, svg path.recharts-rectangle, svg path.recharts-curve").count()).toBeGreaterThan(0);
-    }
+    const wf = page.getByTestId("waterfall");
+    await expect(wf).toBeVisible();
+    await expect(wf).toHaveAttribute("aria-label", /Savings waterfall: .*\$/); // text alternative for the chart
+    const bars = wf.locator("button[data-testid^='waterfall-']");
+    expect(await bars.count()).toBe(7); // seven savings tiers, never mixed
+    await page.getByTestId("waterfall-potential").click();
+    await expect(page.getByTestId("drill-drawer")).toBeVisible();
+    await expect(page.getByTestId("drill-tree")).toContainText(USD_ANYWHERE);
+    await page.getByTestId("drill-drawer").getByLabel("Close").click();
+
+    const cells = page.getByTestId("heatmap").locator("a[data-testid^='heat-']");
+    expect(await cells.count()).toBeGreaterThan(0);
+    const href = (await cells.first().getAttribute("href"))!;
+    expect(href).toMatch(/^\/app\/opportunities\?/);
+    await cells.first().click();
+    await page.waitForURL((u) => u.pathname === "/app/opportunities");
+    await expect(page.getByTestId("opp-list").locator("[data-testid^='opp-card-']").first()).toBeVisible();
   });
 
-  test("top opportunities link through to the opportunity page and next actions resolve", async ({ ownerPage: page }) => {
+  test("recommendations link to the opportunity analysis; tracker and section links resolve", async ({ ownerPage: page }) => {
     await page.goto("/app");
-    const top = page.getByTestId("top-opps");
-    await expect(top.locator("li[data-testid^='top-opp-']").first()).toBeVisible();
-    const first = top.locator("li[data-testid^='top-opp-']").first();
-    const title = (await first.locator("a[href^='/app/opportunities/']").first().innerText()).trim();
-    await expect(first).toContainText(/\$[\d.,]+[KM]?\/yr/);
-    await first.locator("a[href^='/app/opportunities/']").first().click();
-    await page.waitForURL(/\/app\/opportunities\/[0-9a-f-]{36}$/);
+    const recs = page.getByTestId("cmd-recommendations").locator("tr[data-testid^='rec-']");
+    await expect(recs.first()).toBeVisible();
+    const first = recs.first();
+    const id = (await first.getAttribute("data-testid"))!.replace("rec-", "");
+    const title = (await first.locator("td").nth(1).locator("div").first().innerText()).trim();
+    await expect(first).toContainText(USD_ANYWHERE);
+    await page.getByTestId(`rec-view-${id}`).click();
+    await page.waitForURL(new RegExp(`/app/opportunities/${id}$`));
     await expect(page.getByTestId("opportunity-detail")).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toContainText(title);
 
     await page.goto("/app");
-    const links = await page.getByTestId("next-actions").locator("a[href]").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).getAttribute("href")!));
-    expect(links.length).toBeGreaterThan(0);
+    const links = await page.locator("[data-testid='cmd-tracker'] a[href], [data-testid='cmd-departments'] a[href], [data-testid='cmd-insights'] a[href]").evaluateAll((as) => [...new Set(as.map((a) => (a as HTMLAnchorElement).getAttribute("href")!))]);
+    expect(links.length).toBeGreaterThan(3);
     for (const href of links) {
       const res = await page.request.get(href, { maxRedirects: 0 });
-      expect(res.status(), `next-action link ${href}`).toBe(200);
+      expect(res.status(), `link ${href}`).toBe(200);
     }
+  });
+
+  test("scenario switch recomputes projected net savings (conservative < expected < aggressive) and persists in the URL", async ({ ownerPage: page }) => {
+    await page.goto("/app");
+    const net = page.getByTestId("kpi-net");
+    const expected = dollars(await net.innerText());
+    await page.getByTestId("cmd-scenario-conservative").click();
+    await page.waitForURL(/scenario=conservative/);
+    await expect.poll(async () => dollars(await net.innerText())).toBeLessThan(expected);
+    await page.getByTestId("cmd-scenario-aggressive").click();
+    await page.waitForURL(/scenario=aggressive/);
+    await expect.poll(async () => dollars(await net.innerText())).toBeGreaterThan(expected);
+    await expect(page.getByTestId("cmd-scenario-aggressive")).toHaveAttribute("aria-checked", "true");
+    await page.getByTestId("cmd-scenario-expected").click();
+    await expect.poll(async () => dollars(await net.innerText())).toBe(expected);
   });
 });

@@ -105,14 +105,15 @@ export function ProcessGraph({ nodes, edges, selected, onSelect, height = 520 }:
               const rad = r(n); const sel = selected === n.id; const dim = related && !related.has(n.id);
               return (
                 <g key={n.id} data-node transform={`translate(${p.x} ${p.y})`} opacity={dim ? 0.3 : 1} role="button" tabIndex={0} aria-pressed={sel} data-testid={`graph-node-${n.id}`}
-                  aria-label={`${n.label}: ${fmtNum(n.hoursPerWeek, 1)} hours per week, ${fmtNum(n.perWeek, 0)} times per week, average ${fmtNum(n.avgMs / 1000, 0)} seconds`}
+                  aria-label={`${short(n.app, 18)} ${short(n.action, 26)} (${n.label}): ${fmtNum(n.hoursPerWeek, 1)} hours per week, ${fmtNum(n.perWeek, 0)} times per week, average ${fmtNum(n.avgMs / 1000, 0)} seconds`}
                   className="cursor-pointer outline-none [&:focus-visible>circle:first-child]:stroke-[var(--color-indigo)] [&:focus-visible>circle:first-child]:stroke-[4px]"
                   onClick={() => onSelect(n.id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(n.id); } }}>
                   <circle r={rad + (sel ? 5 : 0)} fill={nodeColor(n)} fillOpacity={0.18} stroke={sel ? ACCENT_HEX.indigo : nodeColor(n)} strokeWidth={sel ? 3 : 1.5} />
                   <circle r={Math.max(4, rad * 0.55)} fill={nodeColor(n)} />
                   <text y={rad + 14} textAnchor="middle" className="fill-[var(--color-ink)] text-[11px] font-semibold">{short(n.app, 18)}</text>
-                  <text y={rad + 27} textAnchor="middle" className="fill-[var(--color-ink-2)] text-[10px]">{short(n.action, 26)}</text>
-                  <title>{n.label}</title>
+                  <text y={rad + 27} textAnchor="middle" className="fill-[var(--color-ink-2)] text-[10px]">{" "}{short(n.action, 26)}</text>
+                  {/* no <title>: its text joins the visible labels without a space, so the accessible name (aria-label, which
+                      already carries the full label) no longer contained the visible text (axe label-content-name-mismatch) */}
                 </g>
               );
             })}

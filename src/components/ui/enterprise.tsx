@@ -58,7 +58,7 @@ export function KpiCard({ label, value, format, accent = "royal", basis, caption
         {trend && <span className={cn("inline-flex items-center gap-0.5 font-semibold", (trend.delta >= 0) === (trend.goodWhenUp ?? true) ? "text-emerald-ink" : "text-coral-ink")}>{trend.delta >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}{trend.label}</span>}
         {caption && <span className="min-w-0">{caption}</span>}
       </div>
-      {(onClick || href) && <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-royal-ink opacity-80 group-hover:opacity-100">How is this calculated? <ChevronRight size={12} /></div>}
+      {(onClick || href) && <div className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-royal-ink group-hover:underline">How is this calculated? <ChevronRight size={12} /></div>}
     </>
   );
   const cls = cn("card card-hover group relative block w-full overflow-hidden p-5 text-left", size === "lg" && "sm:p-6");
@@ -142,14 +142,16 @@ export function StatusPill({ status, map }: { status: string; map?: Record<strin
 }
 
 export function Drawer({ open, onClose, title, children, width = "max-w-xl", testid }: { open: boolean; onClose: () => void; title: React.ReactNode; children: React.ReactNode; width?: string; testid?: string }) {
+  const titleId = React.useId(); const closeRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => { const h = (e: KeyboardEvent) => e.key === "Escape" && onClose(); if (open) window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [open, onClose]);
+  React.useEffect(() => { if (open) closeRef.current?.focus(); }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-midnight/50 backdrop-blur-[2px]" onClick={onClose} role="dialog" aria-modal="true" data-testid={testid}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-midnight/50 backdrop-blur-[2px]" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid={testid}>
       <div className={cn("h-full w-full overflow-y-auto bg-surface shadow-[var(--shadow-pop)] fade-up", width)} onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface/95 px-5 py-4 backdrop-blur">
-          <h2 className="text-base font-bold">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-ink-2 hover:bg-surface-2"><X size={18} /></button>
+          <h2 id={titleId} className="text-base font-bold">{title}</h2>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" className="rounded-lg p-1.5 text-ink-2 hover:bg-surface-2"><X size={18} /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>

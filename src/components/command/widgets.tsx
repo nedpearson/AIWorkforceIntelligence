@@ -83,8 +83,9 @@ export function SavingsWaterfall({ tiers, order, onOpen }: { tiers: Record<TierK
             const t = tiers[k]; const acc = TIER_ACCENT(t); const v = t.amount;
             const top = 22 + (v >= 0 ? zeroY - (v / span) * H : zeroY); const h = Math.max(v === 0 ? 2 : 4, (Math.abs(v) / span) * H);
             return (
-              <button key={k} type="button" onClick={() => onOpen(k)} data-testid={`waterfall-${k}`} aria-label={`${t.label}: ${fmtValue(v, "usd")}. Open drill-down.`}
+              <button key={k} type="button" onClick={() => onOpen(k)} data-testid={`waterfall-${k}`}
                 className="group relative h-full rounded-lg outline-offset-2 transition hover:bg-surface-2/60">
+                <span className="sr-only">{t.label}: {fmtValue(v, "usd")}. Open drill-down. </span>
                 <span className="absolute inset-x-0 text-center text-[10px] font-bold tabular text-ink sm:text-xs" style={{ top: Math.max(0, (v >= 0 ? top : top + h) - (v >= 0 ? 18 : -4)) }}>{fmtValue(v, "usdCompact")}</span>
                 <span className="absolute left-1/2 w-[70%] max-w-[64px] -translate-x-1/2 rounded-md transition-all duration-700 group-hover:brightness-110"
                   style={{ top, height: h, background: v === 0 ? "var(--color-surface-3)" : `linear-gradient(180deg, ${ACCENT_HEX[acc]}, ${ACCENT_HEX[acc]}cc)`, boxShadow: v ? `0 8px 18px -10px ${ACCENT_HEX[acc]}` : undefined, transitionDelay: `${i * 40}ms` }} />
@@ -130,11 +131,12 @@ export function OpportunityHeatmap({ types, rows, max }: { types: string[]; rows
                 const q = new URLSearchParams({ type: t, ...(r.departmentId ? { dept: r.departmentId } : {}) });
                 return (
                   <td key={t}>
-                    <Link href={`/app/opportunities?${q}`} data-testid={`heat-${r.departmentId ?? "none"}-${t}`} aria-label={`${r.name}, ${TYPE_LABEL[t] ?? t}: ${fmtValue(c.value, "usd")} per year from ${c.count} opportunities`}
-                      className={cn("flex h-11 flex-col items-center justify-center rounded-lg font-bold tabular ring-1 ring-inset ring-gold/20 transition hover:scale-[1.04] hover:ring-gold", k > 0.45 ? "text-midnight" : "text-ink")}
-                      style={{ background: `rgba(245, 158, 11, ${(0.1 + 0.85 * k).toFixed(3)})` }}>
+                    <Link href={`/app/opportunities?${q}`} data-testid={`heat-${r.departmentId ?? "none"}-${t}`}
+                      className={cn("heat-gold flex h-11 flex-col items-center justify-center rounded-lg font-bold tabular ring-1 ring-inset ring-gold/20 transition hover:scale-[1.04] hover:ring-gold", k > 0.45 ? "text-midnight dark:text-ink" : "text-ink")}
+                      style={{ "--heat-k": k.toFixed(3) } as React.CSSProperties}>
+                      <span className="sr-only">{r.name}, {TYPE_LABEL[t] ?? t}: {fmtValue(c.value, "usd")} per year — </span>
                       <span>{fmtValue(c.value, "usdCompact")}</span>
-                      <span className={cn("text-[9px] font-medium", k > 0.45 ? "text-midnight/70" : "text-ink-3")}>{c.count} opp{c.count === 1 ? "" : "s"}</span>
+                      <span className="text-[9px] font-medium">{c.count} opp{c.count === 1 ? "" : "s"}</span>
                     </Link>
                   </td>
                 );

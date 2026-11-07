@@ -6,11 +6,10 @@ import { Badge, BasisChip, Button, Tooltip } from "@/components/ui";
 import { Meter } from "@/components/dashboard/stat-tile";
 import { StatusPill } from "@/components/ui/enterprise";
 import { cn, fmtUSD, fmtNum } from "@/lib/utils";
+import { OPP_TYPE_LABEL, OPP_STATUS_TONE, OPP_TYPE_ACCENT } from "./opportunity-meta";
 
-export const OPP_TYPE_LABEL: Record<string, string> = { ai_agent: "AI agent", rpa: "RPA bot", conventional_automation: "Integration", process_change: "Process change", role_consolidation: "Consolidation" };
-export const OPP_STATUS_TONE: Record<string, "neutral" | "brand" | "money" | "warn" | "danger" | "info" | "verified" | "projected" | "purple"> = { identified: "neutral", reviewing: "info", approved: "brand", in_progress: "warn", deployed: "money", verified: "verified", rejected: "danger", postponed: "warn", analysis_requested: "purple" };
-/** Chart / chip hue per opportunity type (purple = AI, cyan = automation, royal = integration, indigo = process). */
-export const OPP_TYPE_ACCENT: Record<string, "purple" | "cyan" | "royal" | "indigo" | "emerald"> = { ai_agent: "purple", rpa: "cyan", conventional_automation: "royal", process_change: "indigo", role_consolidation: "emerald" };
+export { OPP_TYPE_LABEL, OPP_STATUS_TONE, OPP_TYPE_ACCENT };
+
 
 export type OppCardData = {
   id: string; title: string; summary?: string; type: string; status: string; rank: number; feasibility: number; risk: number;

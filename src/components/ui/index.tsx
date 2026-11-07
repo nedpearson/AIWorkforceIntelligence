@@ -69,14 +69,16 @@ export function Textarea({ className, label, ...p }: React.TextareaHTMLAttribute
   );
 }
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: React.ReactNode; children: React.ReactNode; wide?: boolean }) {
+  const titleId = React.useId(); const closeRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => { const h = (e: KeyboardEvent) => e.key === "Escape" && onClose(); if (open) window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [open, onClose]);
+  React.useEffect(() => { if (open) closeRef.current?.focus(); }, [open]); // keyboard users land inside the dialog
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={onClose} role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <div className={cn("card max-h-[92vh] w-full overflow-y-auto rounded-b-none sm:rounded-b-[var(--radius-card)] fade-up", wide ? "sm:max-w-4xl" : "sm:max-w-xl")} onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface px-5 py-3">
-          <h2 className="text-base font-semibold">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-ink-2 hover:bg-surface-2"><X size={18} /></button>
+          <h2 id={titleId} className="text-base font-semibold">{title}</h2>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" className="rounded-md p-1 text-ink-2 hover:bg-surface-2"><X size={18} /></button>
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -86,8 +88,10 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
 export function Tooltip({ text, children }: { text: string; children?: React.ReactNode }) {
   return (
     <span className="group relative inline-flex items-center">
-      {children ?? <Info size={14} className="text-ink-3" />}
-      <span role="tooltip" className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 w-56 -translate-x-1/2 rounded-lg bg-midnight px-2.5 py-1.5 text-[11px] leading-snug text-white opacity-0 shadow-pop ring-1 ring-white/10 transition group-hover:opacity-100 group-focus-within:opacity-100">{text}</span>
+      {children ?? <span tabIndex={0} role="img" aria-label={text} className="inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-royal"><Info size={14} className="text-ink-3" aria-hidden /></span>}
+      {/* display:none while hidden — an opacity-0 popover still widens the page at the right edge (horizontal scroll) */}
+      <span role="tooltip" aria-hidden className="pointer-events-none absolute bottom-full left-1/2 z-40 mb-1.5 hidden w-56 -translate-x-1/2 rounded-lg bg-midnight px-2.5 py-1.5 text-[11px] leading-snug text-white shadow-pop ring-1 ring-white/10 group-hover:block group-focus-within:block">{text}</span>
+      {children && <span className="sr-only">{text}</span>}
     </span>
   );
 }

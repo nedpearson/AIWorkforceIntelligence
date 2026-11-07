@@ -61,7 +61,7 @@ test.describe("AI agents", () => {
 
       // ---- Deploy ----
       await page.getByTestId("agent-deploy").click();
-      await expect(page.getByTestId("agent-flash")).toHaveText("Deployed");
+      await expect(page.getByTestId("agent-flash")).toHaveText(/^Deployed/); // "Deployed — version recorded"
       await expect(page.getByRole("heading", { level: 1 })).toContainText("deployed");
       await expect(page.getByTestId("agent-pause")).toBeVisible();
 
@@ -117,16 +117,24 @@ test.describe("AI agents", () => {
       await expect(measurement).toContainText(/\d+ runs/);
       await expect(measurement).toContainText(/observed|estimated|assumed/);
 
-      // ---- Executive dashboard: "Verified so far" is now a measured dollar amount ----
+      // ---- Executive Command Center: "Verified Savings" is now a measured dollar amount ----
       await page.goto("/app");
       const verified = page.getByTestId("kpi-verified");
       await expect(verified).toContainText(USD_ANYWHERE);
       await expect(verified).toContainText(/\d+ measurements?/);
-      const dollars = Number((await verified.innerText()).match(/\$([\d,]+)/)![1].replace(/,/g, ""));
+      const dollars = Number((await verified.innerText()).match(/\$([\d,.]+)/)![1].replace(/,/g, ""));
       expect(dollars).toBeGreaterThan(0);
-      await page.getByTestId("kpi-verified").click();
-      await expect(page.getByTestId("drilldown-modal")).toContainText("Verified savings (annualized)");
-      await expect(page.getByTestId("drilldown-modal")).toContainText("run_ledger");
+      await verified.click();
+      const drill = page.getByTestId("drill-drawer");
+      await expect(drill.getByRole("heading", { level: 2 })).toHaveText("Verified savings");
+      await expect(drill).toContainText(/Measured after deployment from \d+ measurements?/);
+      expect(await page.getByTestId("drill-lineage").locator("li").count(), "verified savings trace back to measurements").toBeGreaterThan(0);
+      await drill.getByLabel("Close").click();
+      // ROI & Savings Center shows the same verified tier as a non-zero observed amount
+      await page.goto("/app/savings");
+      const tier = page.getByTestId("tier-verifiedTime").locator(".tabular").first();
+      await expect(tier).toContainText(USD_ANYWHERE);
+      expect(Number((await tier.innerText()).replace(/[^\d.]/g, ""))).toBeGreaterThan(0);
 
       // the opportunity is now marked deployed and links to the agent
       await page.goto(`/app/opportunities/${oppId}`);

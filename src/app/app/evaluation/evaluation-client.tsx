@@ -63,10 +63,11 @@ export function EvaluationClient({ ev, snapshots, canWrite, canApprove }: { ev: 
           </div>
           <div className="grid flex-1 grid-cols-3 gap-x-2 gap-y-4 sm:grid-cols-5 lg:grid-cols-9" data-testid="eval-dimensions">
             {ev.dimensions.map((x) => (
-              <button key={x.key} onClick={() => setDim(x.key)} className="flex flex-col items-center rounded-xl p-1 text-center hover:bg-surface-2" data-testid={`dim-${x.key}`} aria-label={`${x.label}: ${x.score == null ? "no data" : Math.round(x.score)} of 100. Open details`}>
+              <button key={x.key} onClick={() => setDim(x.key)} className="flex flex-col items-center rounded-xl p-1 text-center hover:bg-surface-2" data-testid={`dim-${x.key}`}>
                 <ScoreRing score={x.score ?? 0} size={64} accent={x.score == null ? "midnight" : undefined} />
                 <span className="mt-1 text-[11px] font-semibold leading-tight">{x.label}</span>
                 <span className="text-[10px] text-ink-3">weight {Math.round(x.weight * 100)}% · <span className={cn("rounded px-1", CONF[x.confidence.level])}>{x.confidence.level}</span></span>
+                <span className="sr-only">{x.score == null ? " (no data)" : ""}. Open details</span>
               </button>
             ))}
           </div>

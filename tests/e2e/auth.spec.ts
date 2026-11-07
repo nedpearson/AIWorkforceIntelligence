@@ -1,10 +1,11 @@
 import { test, expect, ACCOUNTS, PASSWORD, loginViaForm } from "./fixtures";
+import { EXEC_H1 } from "./nav-map";
 
 test.describe("Authentication & authorization", () => {
   test("login succeeds with seeded client-owner credentials and lands on the executive summary", async ({ page }) => {
     await loginViaForm(page, ACCOUNTS.owner.email);
     await expect(page).toHaveURL(/\/app$/);
-    await expect(page.getByRole("heading", { level: 1, name: "Executive Summary" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: EXEC_H1 })).toBeVisible();
     await expect(page.getByTestId("sidebar")).toContainText(ACCOUNTS.owner.email);
     await expect(page.getByTestId("sidebar")).toContainText("owner");
   });
@@ -23,7 +24,7 @@ test.describe("Authentication & authorization", () => {
 
   test("logout clears the session and protected routes redirect to /login afterwards", async ({ page }) => {
     await loginViaForm(page, ACCOUNTS.manager.email, PASSWORD);
-    await page.getByTestId("logout").click();
+    await page.getByTestId("sidebar").getByTestId("logout").click(); // the closed mobile drawer carries a second (hidden) copy
     await page.waitForURL(/\/login/);
     const cookies = await page.context().cookies();
     expect(cookies.some((c) => c.name.includes("authjs.session-token"))).toBe(false);
@@ -51,7 +52,7 @@ test.describe("Authentication & authorization", () => {
 
     await page.goto("/app/settings");
     await expect(page).toHaveURL(/\/app\?denied=org(:|%3A)manage/);
-    await expect(page.getByRole("heading", { level: 1, name: "Executive Summary" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: EXEC_H1 })).toBeVisible();
 
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/app\?denied=consultancy/);

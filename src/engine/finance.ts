@@ -634,7 +634,9 @@ export async function generateExecutiveReport(orgId: string, kind: ReportKind, o
   const periodEnd = opts.periodEnd ?? now;
   const periodStart = opts.periodStart ?? (kind === "monthly_performance" ? new Date(periodEnd.getTime() - 30 * MS_PER_DAY) : new Date(periodEnd.getTime() - DAYS_PER_YEAR * MS_PER_DAY));
   const scenario = opts.scenario ?? "expected";
-  const fin = await computeOrgFinancials(orgId, { scenario, opportunityIds: opts.opportunityIds, ...(kind === "monthly_performance" ? { periodStart, periodEnd } : {}) });
+  // No scenario requested → the organization's saved model, exactly as /app and /app/finance show it. Forcing the
+  // Expected preset here made a report differ from the screen it was downloaded from once custom assumptions were saved.
+  const fin = await computeOrgFinancials(orgId, { ...(opts.scenario ? { scenario: opts.scenario } : {}), opportunityIds: opts.opportunityIds, ...(kind === "monthly_performance" ? { periodStart, periodEnd } : {}) });
   const org = await withTenant(orgId, async (tx) => (await tx.select().from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1))[0]);
   const branding = org.branding ?? {};
   const whiteLabel = !!branding.reportName;

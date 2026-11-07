@@ -22,7 +22,7 @@ export function AdminShell({ email, role, consultancyName, primaryColor, childre
   const nav = (
     <nav className="flex flex-1 flex-col gap-0.5 px-2 py-2" aria-label="Consulting portal">
       {ADMIN_NAV.map((n) => { const active = n.href === "/admin" ? path === "/admin" || path.startsWith("/admin/clients") : path.startsWith(n.href); return (
-        <Link key={n.href} href={n.href} data-testid={n.testid} onClick={() => setOpen(false)} className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition", active ? "bg-brand-soft font-medium text-brand" : "text-ink-2 hover:bg-surface-2 hover:text-ink")}>
+        <Link key={n.href} href={n.href} data-testid={n.testid} onClick={() => setOpen(false)} className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition", active ? "bg-brand-soft font-semibold text-ink shadow-[inset_3px_0_0_var(--color-brand)]" : "text-ink-2 hover:bg-surface-2 hover:text-ink")}>
           <n.icon size={17} className="shrink-0" />{n.label}
         </Link>); })}
       <Link href="/app" data-testid="admin-nav-client-app" onClick={() => setOpen(false)} className="mt-2 flex items-center gap-2.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-ink-2 hover:bg-surface-2"><ArrowLeftRight size={17} />Client app</Link>
@@ -32,7 +32,7 @@ export function AdminShell({ email, role, consultancyName, primaryColor, childre
     <div className="flex items-center gap-2 px-4 py-4"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">B</div><div className="leading-tight"><div className="text-sm font-semibold">BridgeBox</div><div className="text-[10px] uppercase tracking-wider text-ink-3">Consulting Portal</div></div></div>
   );
   return (
-    <div className="flex min-h-screen" style={primaryColor ? ({ "--color-brand": primaryColor } as React.CSSProperties) : undefined}>
+    <div className="flex min-h-screen" style={primaryColor ? ({ "--color-brand": primaryColor, "--color-brand-soft": `color-mix(in oklab, ${primaryColor} 10%, var(--color-surface))` } as React.CSSProperties) : undefined}>
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-surface lg:flex" data-testid="admin-sidebar">
         {brandBlock}
         {nav}

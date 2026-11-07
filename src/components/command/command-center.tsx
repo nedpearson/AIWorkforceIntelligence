@@ -49,7 +49,10 @@ export function CommandCenter({ model: m, deptFilter, period, layout, views, act
   };
   const setPeriod = (p: string) => { const to = new Date(); const from = new Date(to.getTime() - Number(p) * 86_400_000); setParam("period", p, { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }); };
   const currentFilters = Object.fromEntries(["bu", "dept", "loc", "scenario", "period", "from", "to"].flatMap((k) => (sp.get(k) ? [[k, sp.get(k)!]] : []))) as Record<string, string>;
-  const exportQuery = new URLSearchParams({ scenario, ...(m.overrides.periodStart ? { from: m.overrides.periodStart.slice(0, 10) } : {}), ...(m.overrides.periodEnd ? { to: m.overrides.periodEnd.slice(0, 10) } : {}) }).toString();
+  // Only pin a scenario the user picked: with none, the page shows the saved financial model and the exports must too
+  // (sending scenario=expected applied the preset instead and the workbook disagreed with the KPIs on screen).
+  const pickedScenario = sp.get("scenario") ? scenario : undefined;
+  const exportQuery = new URLSearchParams({ ...(pickedScenario ? { scenario: pickedScenario } : {}), ...(m.overrides.periodStart ? { from: m.overrides.periodStart.slice(0, 10) } : {}), ...(m.overrides.periodEnd ? { to: m.overrides.periodEnd.slice(0, 10) } : {}) }).toString();
 
   // ---------- drills ----------
   const oppLineage = f.opportunities.map((o) => ({ label: o.title, href: `/app/opportunities/${o.id}`, amount: o.grossAnnualSavings, hours: o.hoursRecoverablePerWeek, basis: "estimated" as const, status: o.status }));
@@ -233,7 +236,7 @@ export function CommandCenter({ model: m, deptFilter, period, layout, views, act
           <div className="flex flex-wrap gap-2 xl:justify-end">
             <Button variant="glass" href="/app/assistant" data-testid="cmd-advisor"><MessageSquareText size={15} />AI Advisor</Button>
             <Button variant="gradient" href={`/present${scenario !== "expected" ? `?scenario=${scenario}` : ""}`} data-testid="cmd-present"><Presentation size={15} />Present</Button>
-            <ExportMenu query={exportQuery} scenario={scenario} canPdf={perms.canPdf} />
+            <ExportMenu query={exportQuery} scenario={pickedScenario} canPdf={perms.canPdf} />
           </div>
         </div>
         <div className="relative mt-6 flex flex-col gap-4 border-t border-white/10 pt-5 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">

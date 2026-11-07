@@ -1,4 +1,15 @@
 import { test, expect, uniq } from "./fixtures";
+import type { Page } from "@playwright/test";
+
+/** Completes running campaigns created by earlier (possibly aborted) runs of this spec. Only touches rows it named. */
+async function completeLeftoverE2eCampaigns(page: Page) {
+  const leftovers = page.locator("tr[data-testid^='campaign-row-']").filter({ hasText: /^(E2E campaign coll-|Default-dates campaign coll-default-)/ }).filter({ hasText: "running" });
+  for (let i = 0; i < 20 && (await leftovers.count()); i++) {
+    const id = (await leftovers.first().getAttribute("data-testid"))!.replace("campaign-row-", "");
+    await page.getByTestId(`campaign-complete-${id}`).click();
+    await expect(page.getByTestId(`campaign-row-${id}`)).toContainText("completed");
+  }
+}
 
 /**
  * Data-collection workflow as the client owner, then the collector wire protocol driven directly
@@ -39,6 +50,7 @@ test.describe("Data collection", () => {
 
     // ---- Campaign: create one covering today (no daily schedule, whole organization) and start it ----
     await page.getByTestId("tab-campaigns").click();
+    await completeLeftoverE2eCampaigns(page); // events go to the first matching running campaign; earlier aborted runs must not capture them
     await page.getByTestId("campaign-create").click();
     const form = page.getByTestId("campaign-form");
     await expect(form).toBeVisible();
@@ -129,9 +141,11 @@ test.describe("Data collection", () => {
     await expect(row.locator("td").nth(6)).toHaveText("20"); // events counted on the campaign
     await page.getByTestId(`campaign-analyze-${campaignId}`).click();
     await expect(page.getByTestId(`campaign-analysis-${campaignId}`)).toContainText(/job (queued|running)|done/);
-    // the executive dashboard's monitoring card sees the new activity
-    await page.goto("/app");
-    await expect(page.getByTestId("monitoring-health")).toContainText(/\d+ events in the last 24h/);
+    // the monitoring card (moved from the executive page to Desktop Collectors in the Phase A redesign) counts the new activity
+    await page.goto("/app/collection?tab=collectors");
+    const ev24 = page.getByTestId("health-events-24h");
+    await expect(ev24).toContainText(/\d/);
+    expect(Number((await ev24.locator("span").first().innerText()).replace(/,/g, "")), "events in the last 24h include the 20 just sent").toBeGreaterThanOrEqual(20);
     // leave the org tidy: finish the e2e campaign so it does not stay "running" for other specs
     await page.goto("/app/collection?tab=campaigns");
     await page.getByTestId(`campaign-complete-${campaignId}`).click();
@@ -161,5 +175,9 @@ test.describe("Data collection", () => {
     await request.post("/api/collect/consent", { headers: { authorization: `Bearer ${e.token}` }, data: { collectorId: e.collectorId, noticeVersion: e.notice.version } });
     const batch = await request.post("/api/collect/events", { headers: { authorization: `Bearer ${e.token}` }, data: { collectorId: e.collectorId, events: [{ ts: new Date().toISOString(), type: "app_focus", app: "Excel", durationMs: 1000 }] } });
     expect(await batch.json(), "an event sent right after starting a default-dated campaign must be accepted").toMatchObject({ accepted: 1 });
+    // tidy: finish the campaign so it does not capture events sent by later runs of the main collection test
+    await page.goto("/app/collection?tab=campaigns");
+    await page.getByTestId(`campaign-complete-${campaignId}`).click();
+    await expect(page.getByTestId(`campaign-row-${campaignId}`)).toContainText("completed");
   });
 });

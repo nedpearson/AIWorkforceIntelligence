@@ -6,7 +6,7 @@ import { withTenant } from "@/db/tenant";
 import { schema } from "@/db/client";
 import { can } from "@/lib/rbac";
 import { Badge, PageHeader } from "@/components/ui";
-import { OPP_STATUS_TONE } from "@/components/dashboard/opportunity-card";
+import { OPP_STATUS_TONE } from "@/components/dashboard/opportunity-meta";
 import { fmtNum } from "@/lib/utils";
 
 export const metadata = { title: "Search" };

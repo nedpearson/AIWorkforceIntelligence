@@ -1,0 +1,105 @@
+{
+  "startedAt": "2026-11-07T09:12:06.092Z",
+  "employees": 2000,
+  "workdays": 10,
+  "concurrency": 4,
+  "baseUrl": "http://localhost:3000",
+  "host": {
+    "cpus": 2,
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "totalMemGB": 7.8,
+    "node": "v22.23.4",
+    "platform": "Linux 6.18.44-fc-v310"
+  },
+  "ingestion": {
+    "eventsSent": 1160003,
+    "eventsAccepted": 1160003,
+    "dropped": {},
+    "batches": 2000,
+    "seconds": 84.9,
+    "eventsPerSec": 13663,
+    "eventsPerSecExclGeneration": 13708,
+    "batchLatencyMs": {
+      "p50": 159,
+      "p95": 314,
+      "max": 481
+    }
+  },
+  "eventsStored": 1160003,
+  "analysis": {
+    "seconds": 9,
+    "runId": "e58cc3f7-873f-4f4f-ae02-6ce00890c251",
+    "eventsAnalyzed": 1160003,
+    "workflowsFound": 10,
+    "opportunitiesFound": 8,
+    "rssDeltaMB": 453,
+    "peakRssMB": 815
+  },
+  "latencyMs": {
+    "/app": {
+      "firstRequest": 1191,
+      "sequential20": {
+        "p50": 1117,
+        "p95": 1227,
+        "max": 1231
+      },
+      "concurrent5": {
+        "p50": 5365,
+        "max": 5370,
+        "statuses": [
+          200
+        ]
+      }
+    },
+    "/app/opportunities": {
+      "firstRequest": 1125,
+      "sequential20": {
+        "p50": 989,
+        "p95": 1081,
+        "max": 1088
+      },
+      "concurrent5": {
+        "p50": 2995,
+        "max": 2996,
+        "statuses": [
+          200
+        ]
+      }
+    },
+    "/app/process-mining": {
+      "firstRequest": 999,
+      "sequential20": {
+        "p50": 998,
+        "p95": 1115,
+        "max": 1127
+      },
+      "concurrent5": {
+        "p50": 3123,
+        "max": 3169,
+        "statuses": [
+          200
+        ]
+      }
+    },
+    "/app/savings": {
+      "firstRequest": 1020,
+      "sequential20": {
+        "p50": 988,
+        "p95": 1102,
+        "max": 1126
+      },
+      "concurrent5": {
+        "p50": 2433,
+        "max": 2437,
+        "statuses": [
+          200
+        ]
+      }
+    }
+  },
+  "cleanup": {
+    "seconds": 1.7,
+    "remainingEvents": 0
+  },
+  "totalSeconds": 202.6
+}

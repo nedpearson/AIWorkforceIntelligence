@@ -1,20 +1,8 @@
 import { test, expect, watchConsole, GULF_COAST_NAME } from "./fixtures";
+import { APP_NAV, BENIGN_CONSOLE, navFor } from "./nav-map";
 
-/** Every client-app sidebar item (src/components/app-shell.tsx NAV) → expected URL + h1. */
-const APP_NAV: { testid: string; path: string; h1: string }[] = [
-  { testid: "nav-executive", path: "/app", h1: "Executive Summary" },
-  { testid: "nav-departments", path: "/app/departments", h1: "Departments" },
-  { testid: "nav-employees", path: "/app/employees", h1: "People" },
-  { testid: "nav-workflows", path: "/app/workflows", h1: "Workflows" },
-  { testid: "nav-opportunities", path: "/app/opportunities", h1: "Opportunities" },
-  { testid: "nav-agents", path: "/app/agents", h1: "AI Agents" },
-  { testid: "nav-finance", path: "/app/finance", h1: "Financial Model" },
-  { testid: "nav-reports", path: "/app/reports", h1: "Reports" },
-  { testid: "nav-collection", path: "/app/collection", h1: "Data Collection" },
-  { testid: "nav-assistant", path: "/app/assistant", h1: "Ask BridgeBox" },
-  { testid: "nav-settings", path: "/app/settings", h1: "Settings" },
-  { testid: "nav-trust", path: "/app/trust", h1: "Trust & Privacy" },
-];
+const byTestid = (t: string) => APP_NAV.find((n) => n.testid === t)!;
+
 /** Consulting-portal items (src/components/admin/admin-shell.tsx ADMIN_NAV). */
 const ADMIN_NAV: { testid: string; path: string; h1: string }[] = [
   { testid: "admin-nav-clients", path: "/admin", h1: "Client portfolio" },
@@ -25,8 +13,8 @@ const ADMIN_NAV: { testid: string; path: string; h1: string }[] = [
   { testid: "admin-nav-team", path: "/admin/team", h1: "Consultancy team" },
 ];
 
-/** Console noise that is not an application error. Everything else fails the test. */
-const IGNORED_CONSOLE = [/favicon\.ico/];
+/** Console noise that is not an application error (documented in nav-map.ts). Everything else fails the test. */
+const IGNORED_CONSOLE = BENIGN_CONSOLE;
 
 test.describe("Navigation", () => {
   test("client owner: every sidebar item loads its page with the right URL and heading and no console errors", async ({ ownerPage: page }) => {
@@ -35,11 +23,13 @@ test.describe("Navigation", () => {
     await expect(page.getByTestId("sidebar")).toBeVisible();
     const sidebar = page.getByTestId("sidebar");
     const visible = await sidebar.locator("nav a[data-testid^='nav-']").evaluateAll((as) => as.map((a) => a.getAttribute("data-testid")));
-    expect(visible.sort()).toEqual([...APP_NAV.map((n) => n.testid)].sort()); // the owner sees exactly the 12 items
-    for (const item of APP_NAV) {
+    const mine = navFor("owner");
+    expect(visible.sort()).toEqual(mine.map((n) => n.testid).sort()); // the owner sees exactly the documented 26 items
+    for (const item of mine) {
       await sidebar.getByTestId(item.testid).click();
       await page.waitForURL((u) => u.pathname === item.path);
       await expect(page.getByRole("heading", { level: 1, name: item.h1, exact: true })).toBeVisible();
+      await expect(page.getByTestId("sidebar").getByTestId(item.testid)).toHaveAttribute("aria-current", "page");
       await expect(page.locator("body")).not.toContainText("Application error");
       await expect(page.locator("main")).not.toContainText("This page could not be found");
       expect(errors, `console errors on ${item.path}`).toEqual([]);
@@ -78,7 +68,7 @@ test.describe("Navigation", () => {
       expect(sw, `horizontal overflow on ${where}: scrollWidth ${sw} > innerWidth ${iw}`).toBeLessThanOrEqual(iw);
     };
     await noOverflow("/app");
-    for (const item of [APP_NAV[3], APP_NAV[4], APP_NAV[6]]) { // Workflows, Opportunities, Financial Model
+    for (const item of [byTestid("nav-workflows"), byTestid("nav-opportunities"), byTestid("nav-finance")]) {
       await page.getByTestId("menu-button").click();
       const drawer = page.getByTestId("mobile-sidebar");
       await expect(drawer).toBeVisible();
