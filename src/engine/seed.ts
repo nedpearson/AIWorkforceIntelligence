@@ -18,7 +18,15 @@ export async function seedDemo(opts: { days?: number; log?: (m: string) => void;
   const log = opts.log ?? console.log;
   const PASSWORD = process.env.SEED_PASSWORD ?? "Demo!Pass123";
   const [existing] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, "bridgebox")).limit(1);
-  if (existing) { log("already seeded"); return { skipped: true }; }
+  if (existing) {
+    // Already seeded — but make sure the demo client has been analysed (a previous bootstrap may have died mid-way).
+    const [demo] = await db.select().from(schema.organizations).where(eq(schema.organizations.slug, DEMO_ORG.slug)).limit(1);
+    if (demo) {
+      const [wf] = await db.select({ id: schema.workflows.id }).from(schema.workflows).where(eq(schema.workflows.orgId, demo.id)).limit(1);
+      if (!wf) { const [camp] = await db.select({ id: schema.observationCampaigns.id }).from(schema.observationCampaigns).where(eq(schema.observationCampaigns.orgId, demo.id)).limit(1); const run = await runAnalysis({ orgId: demo.id, campaignId: camp?.id }); log("analysis (repair): " + JSON.stringify(run)); return { skipped: true, analysis: run }; }
+    }
+    log("already seeded"); return { skipped: true };
+  }
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const [consultancy] = await db.insert(schema.organizations).values({ name: "BridgeBox Consulting", slug: "bridgebox", kind: "consultancy", branding: { reportName: "BridgeBox AI Workforce Intelligence", primaryColor: "#0f766e" } }).returning();

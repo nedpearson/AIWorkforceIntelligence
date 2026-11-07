@@ -7,7 +7,14 @@ DO $$ BEGIN
 END $$;
 GRANT USAGE ON SCHEMA __SCHEMA__ TO bridgebox_app;
 -- Let the connecting (owner) role switch into the RLS-enforced role.
-DO $$ BEGIN IF NOT pg_has_role(current_user, 'bridgebox_app', 'MEMBER') THEN EXECUTE format('GRANT bridgebox_app TO %I', current_user); END IF; EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'grant bridgebox_app to % manually', current_user; END $$;
+DO $$ BEGIN
+  -- PG16+: membership must carry SET option for SET ROLE; the creator gets ADMIN but not SET by default (Neon/RDS).
+  IF current_setting('server_version_num')::int >= 160000 THEN
+    EXECUTE format('GRANT bridgebox_app TO %I WITH SET TRUE, INHERIT TRUE', current_user);
+  ELSE
+    EXECUTE format('GRANT bridgebox_app TO %I', current_user);
+  END IF;
+EXCEPTION WHEN insufficient_privilege OR invalid_grant_operation THEN RAISE NOTICE 'grant bridgebox_app to % manually: %', current_user, SQLERRM; END $$;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA __SCHEMA__ TO bridgebox_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA __SCHEMA__ TO bridgebox_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA __SCHEMA__ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bridgebox_app;
@@ -27,26 +34,24 @@ BEGIN
     'reports','subscriptions','invoices','integrations'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
-    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
+    EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY', t); -- owner = admin handle (auth, jobs, seed); app role is always policy-bound
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t);
     EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (org_id = app_current_org()) WITH CHECK (org_id = app_current_org())', t);
   END LOOP;
 END $$;
 
 -- organizations: app role may read only its own org (and a consultancy may read its clients).
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organizations FORCE ROW LEVEL SECURITY;
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY; ALTER TABLE organizations NO FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS org_self ON organizations;
 CREATE POLICY org_self ON organizations USING (id = app_current_org() OR parent_org_id = app_current_org());
 -- users table is reachable through the admin handle only; app role gets id/name/email for joins
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users FORCE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY; ALTER TABLE users NO FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS users_in_org ON users;
 CREATE POLICY users_in_org ON users USING (EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id AND m.org_id = app_current_org()));
 -- audit_log and jobs: insert-only for app role, read own org
-ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY; ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY; ALTER TABLE audit_log NO FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS audit_org ON audit_log;
 CREATE POLICY audit_org ON audit_log USING (org_id = app_current_org()) WITH CHECK (org_id = app_current_org());
-ALTER TABLE jobs ENABLE ROW LEVEL SECURITY; ALTER TABLE jobs FORCE ROW LEVEL SECURITY;
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY; ALTER TABLE jobs NO FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS jobs_org ON jobs;
 CREATE POLICY jobs_org ON jobs USING (org_id = app_current_org()) WITH CHECK (org_id = app_current_org());
