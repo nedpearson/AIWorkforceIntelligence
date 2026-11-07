@@ -2,14 +2,16 @@
 -- The application role `bridgebox_app` is NOT a superuser, so policies are enforced for it.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bridgebox_app') THEN
-    CREATE ROLE bridgebox_app NOLOGIN;
+    BEGIN CREATE ROLE bridgebox_app NOLOGIN; EXCEPTION WHEN insufficient_privilege THEN RAISE EXCEPTION 'Create role bridgebox_app as a DB admin first: CREATE ROLE bridgebox_app NOLOGIN; GRANT bridgebox_app TO <app user>;'; END;
   END IF;
 END $$;
-GRANT USAGE ON SCHEMA public TO bridgebox_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bridgebox_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bridgebox_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bridgebox_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO bridgebox_app;
+GRANT USAGE ON SCHEMA __SCHEMA__ TO bridgebox_app;
+-- Let the connecting (owner) role switch into the RLS-enforced role.
+DO $$ BEGIN IF NOT pg_has_role(current_user, 'bridgebox_app', 'MEMBER') THEN EXECUTE format('GRANT bridgebox_app TO %I', current_user); END IF; EXCEPTION WHEN insufficient_privilege THEN RAISE NOTICE 'grant bridgebox_app to % manually', current_user; END $$;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA __SCHEMA__ TO bridgebox_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA __SCHEMA__ TO bridgebox_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA __SCHEMA__ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bridgebox_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA __SCHEMA__ GRANT USAGE, SELECT ON SEQUENCES TO bridgebox_app;
 
 CREATE OR REPLACE FUNCTION app_current_org() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('app.current_org', true), '')::uuid
